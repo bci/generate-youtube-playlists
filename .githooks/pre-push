@@ -1,0 +1,13 @@
+#!/bin/sh
+# Runs on every `git push`. Blocks the push if lint or tests fail.
+# Enabled via: git config core.hooksPath .githooks   (run once per clone)
+
+set -e
+
+echo "[pre-push] Linting..."
+npm run lint
+
+echo "[pre-push] Running full test suite..."
+npm test
+
+echo "[pre-push] OK — lint and tests passed."

@@ -1,0 +1,77 @@
+# One YouTube channel per line, as a handle plus optional `key=value` settings.
+# Lines starting with # are ignored, as are blank lines.
+# The leading @ is optional (both "@SomeChannel" and "SomeChannel" work).
+#
+# This file is only used when you run the workflow WITHOUT a channel argument.
+# To process a single channel ad-hoc, pass it on the command line instead:
+#     npm start -- @SomeChannel
+#
+# Copy this file to `config/channels.txt` (git-ignored) and put your own handles in it.
+#
+# Order here does NOT matter: after the status check the tool processes the smallest
+# backlog first, so a nearly-complete channel finishes before a large backfill
+# consumes the day's quota.
+#
+# A malformed setting is a FATAL error, not a warning. This file is read before a
+# single unit of quota is spent, and every setting below has a silent-failure mode
+# that looks like something else went wrong.
+#
+# ---------------------------------------------------------------------------------
+# after=YYYY-MM-DD     Only collect videos published on or after this day.
+# older=keep|remove    What to do with videos already in the playlist that fall
+#                      below the cutoff. Default `remove`.
+#
+#     @SomeChannel after=2026-01-01                only videos from 1 Jan 2026 onward
+#     @SomeChannel after=2026-01-01 older=remove   ...and delete the older ones (default)
+#     @SomeChannel after=2026-01-01 older=keep     ...and leave the older ones alone
+#
+# The date is UTC and INCLUSIVE: after=2026-01-01 keeps a video published on 1 Jan.
+#
+# `older=remove` is the default because the date describes what the playlist should
+# HOLD, not just what to add next. Mind the cost before adding a cutoff to a channel
+# whose playlist is already full: each deletion is 50 quota units against a budget of
+# roughly 200 writes a day, so a long back catalogue takes several nights to clear,
+# and the videos do not come back if you move the date later. Use `older=keep` to
+# gate new additions only and delete nothing.
+#
+# ---------------------------------------------------------------------------------
+# shorts=no|yes|only|split   How this channel's Shorts are treated. Default `no`.
+# shorts-title="..."         Name the playlist that holds the Shorts.
+#
+#     @SomeChannel shorts=no      one playlist, Shorts left out           (the default)
+#     @SomeChannel shorts=yes     one playlist, Shorts mixed in
+#     @SomeChannel shorts=only    one playlist, ONLY Shorts
+#     @SomeChannel shorts=split   TWO playlists: "SomeChannel" and "SomeChannel (Shorts)"
+#
+#     @SomeChannel shorts=split shorts-title="SomeChannel Clips"   name it yourself
+#
+# Shorts are left out by default because a channel's Shorts are usually clips of its
+# real videos, and a playlist meant to be watched end to end does not want them.
+#
+#   - `shorts=only` is for a channel that posts nothing BUT Shorts. Under the default
+#     its playlist comes out empty, which looks just like a broken handle.
+#   - `shorts=split` is for a channel that posts both and you want them apart. The
+#     channel is still read ONCE — the uploads listing and the Shorts probe are
+#     charged per channel, not per playlist — and each playlist keeps its own watched
+#     ledger, so a watched Short never affects the videos playlist.
+#   - `shorts-title=` renames whichever playlist holds the Shorts. Quote it if it
+#     contains spaces. `split` defaults to "<Name> (Shorts)"; `only` has nothing to
+#     collide with, so it defaults to plain "<Name>".
+#
+# Turning Shorts on backfills every Short at 50 quota units each, so try it first:
+#     npm start -- @SomeChannel --shorts=split --dry-run
+# Turning it back off does NOT remove the Shorts already in a playlist.
+#
+# ---------------------------------------------------------------------------------
+# The settings are order-independent and combine freely:
+#     @SomeChannel after=2026-01-01 older=keep shorts=split shorts-title="SomeChannel Clips"
+#
+# --after=, --older= and --shorts= apply the same settings to a whole run and
+# override this file, which is how to try one out before committing it here.
+@SomeChannel
+@AnotherChannel
+@ABigChannel          after=2026-01-01
+@AnotherBigChannel    after=2026-01-01 older=keep
+@AShortsOnlyChannel   shorts=only
+@AChannelThatPostsBoth  shorts=split
+@AndOneWithItsOwnName   shorts=split shorts-title="Custom Clips Playlist"

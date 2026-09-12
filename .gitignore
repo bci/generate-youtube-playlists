@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Secrets — NEVER commit (all creds live in .env now)
+.env
+.env.*
+!.env.example
+
+# Generated output
+report.html
+logs/
+*.log
+
+# Your own channel list (config/channels.example.txt is the tracked template)
+config/channels.txt
+
+# Local watched-video ledger (per machine; see README "Watched videos")
+state/
