@@ -229,3 +229,28 @@ Treat everything tracked here as world-readable, because it is.
   names and viewing habits.
 - Before adding a file, ask whether it would be fine on the front page of the repo. If not,
   it belongs in `.gitignore` with a template beside it.
+
+## 13. The Bookkeeping Is Part of the Change
+
+Three files describe this project to anyone who arrives later, and they are wrong the moment
+a change lands without them: `WORKLOG.md` (what was done and **why**), `VERSIONS.md` (what
+shipped), and `features.yaml` (what exists, what is planned, under stable `FEAT-NNNN` ids).
+The full conventions are in [AGENTS.md](AGENTS.md); the rule here is simply that updating
+them is **part of the work, not a follow-up task**.
+
+This matters more than it looks. The git history was squashed to a single commit when the
+repo went public, so these files *are* the project's memory — there is no commit log behind
+them to reconstruct anything from.
+
+Two specific failure modes to avoid:
+
+- **Leaving a `features.yaml` entry at `planned` after building it.** The manifest exists so
+  the question can be answered without reading the source; an entry that lies is worse than
+  no entry, because it is trusted.
+- **Writing a worklog entry that lists what changed but not why.** The diff already shows
+  what changed. The reasoning — the failure that motivated a guard, the cheaper approach
+  that was rejected and the reason — is the part that cannot be recovered later, and it is
+  the whole point of the file.
+
+If a change is too small to be worth a worklog entry, it is small enough that saying so in
+one line costs nothing. Do that rather than skipping silently.

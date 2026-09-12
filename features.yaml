@@ -1,0 +1,182 @@
+# features.yaml — canonical feature-status manifest for the generate-youtube-playlists repo.
+#
+# Purpose: a structured rollup of what this tool does and what is still planned, so a
+# teammate (or a Claude session) can answer "is the Shorts split done?" or "what is left
+# for macOS?" without reading the source.
+#
+# How this relates to the other tracking files:
+#   VERSIONS.md   — the changelog: what shipped in which release
+#   WORKLOG.md    — the narrative: what was done and WHY it is shaped that way
+#   features.yaml — this file: one entry per feature, stable ids, current status
+#
+# Schema
+# ------
+# version: integer — bump on any breaking schema change.
+# updated: YYYY-MM-DD — last time this file changed.
+# components: list of { id, name, path } — the surfaces a feature can touch.
+# features: list of entries:
+#   id:          "FEAT-NNNN" (zero-padded, stable, never renumbered).
+#   title:       short human-readable title
+#   description: 1-3 sentences, user-facing where possible
+#   components:  list of component ids
+#   status:      planned | in-dev | in-test | complete | deferred
+#   release:     the VERSIONS.md release that LAST changed this feature
+#                ("Unreleased" when its newest change has not shipped yet)
+#   added:       YYYY-MM-DD the feature first landed
+#   updated:     YYYY-MM-DD its most recent change
+#   notes:       free-form — evidence, follow-ups, caveats.
+#
+# The repo history was squashed to a single initial commit on 2026-09-12, so every
+# shipped feature below carries that date. It is the date the public repo begins, not
+# the date each feature was originally written.
+
+version: 1
+updated: 2026-09-12
+
+components:
+  - id: core
+    name: Node CLI
+    path: src
+  - id: ops
+    name: Scheduling wrappers and scheduled tasks
+    path: .
+  - id: qa
+    name: Tests
+    path: test
+
+features:
+  - id: FEAT-0001
+    title: Per-channel chronological playlist sync
+    description: >
+      Resolve a channel handle to its uploads, find-or-create a private playlist named
+      after it, and insert the missing videos at their chronological positions. Reruns
+      are idempotent.
+    components: [core, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      Two-phase by design - read every channel before writing anything - so a mid-run
+      quota stop still produces a truthful report. Inserts run smallest-backlog-first.
+
+  - id: FEAT-0002
+    title: Per-channel publish-date window (after= / older=)
+    description: >
+      A channel line can carry a UTC, inclusive cutoff. older=remove (the default)
+      deletes anything below it; older=keep gates additions only.
+    components: [core, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      A cutoff deletion is forgotten by the ledger rather than banked as a watch, so
+      moving the date later does not hold that catalogue out for good. Verified against
+      the live account on 2026-09-12.
+
+  - id: FEAT-0003
+    title: Shorts handling, including split into a second playlist
+    description: >
+      shorts= takes no (default), yes, only, or split. split gives one channel two
+      playlists - its videos and its Shorts - named via shorts-title= when desired.
+    components: [core, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      Both playlists come from a SINGLE channel read; the uploads listing and the Shorts
+      probe are charged per channel, not per playlist. Known limit - there is no
+      shorts=remove, so turning Shorts off leaves the ones already in a playlist.
+
+  - id: FEAT-0004
+    title: Watched-video ledger and pruning
+    description: >
+      Videos that have been watched are deleted from the playlist and never re-added.
+      Three signals feed one ledger: a Like, a removal by hand, and a manually curated
+      Watched playlist that the tool only ever reads.
+    components: [core, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      YouTube exposes no watch history, so these signals are the substitute. The ledger
+      is permanent by design - a delete without a memory becomes a delete/re-add loop at
+      100 quota units per video per night.
+
+  - id: FEAT-0005
+    title: HTML run report
+    description: >
+      One row per playlist with Added / Removed / In playlist columns, a short status
+      note, and a link to each playlist. Written to report.html every run.
+    components: [core, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: Pure builder in src/report.js, so it is testable without an API key.
+
+  - id: FEAT-0006
+    title: Emailed report via Microsoft Graph
+    description: >
+      Optional delivery of the run report through the Microsoft 365 Graph API
+      (client-credentials flow), with --email-on-change for unattended runs.
+    components: [core]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      The sender must be a real licensed mailbox - Graph rejects an address with nothing
+      behind it, including a Google identity sharing the domain.
+
+  - id: FEAT-0007
+    title: Heartbeat and staleness watchdog
+    description: >
+      Every completed run writes state/last-run.json; a separate watchdog emails an
+      alert when the last successful run is older than 36 hours.
+    components: [core, ops, qa]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      Exists because a scheduled task that never fires writes no log, so its failure is
+      invisible to anything that reads logs. 36 hours is two missed nights, so one late
+      run stays silent.
+
+  - id: FEAT-0008
+    title: Windows scheduled-task wrappers
+    description: >
+      run-sync.cmd and run-watchdog.cmd, driven by two Windows Scheduled Tasks, with
+      output appended to logs/.
+    components: [ops]
+    status: complete
+    release: 2026.09.12
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      The task must be registered with -LogonType S4U; an interactive-only task is
+      skipped in silence on every night nobody is logged on.
+
+  - id: FEAT-0009
+    title: macOS support - launchd scheduling and shell wrappers
+    description: >
+      Run the nightly sync and the watchdog unattended on macOS: shell equivalents of
+      the two .cmd wrappers, two launchd LaunchAgents replacing the Scheduled Tasks,
+      and a README section covering setup plus the state/ migration.
+    components: [ops]
+    status: planned
+    release: Unreleased
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      Spec in docs/prompts/prompt-macos-support-v1.md. The Node code is already
+      platform-neutral (verified 2026-09-12 - no process.platform branching, all paths
+      built with path.join from __dirname), so this is an ops-only change and src/
+      should not need to change at all. .githooks/pre-push is already POSIX sh and
+      needs no port. The highest-risk step is the migration, not the scheduling:
+      state/ and .env must be copied BEFORE the first run on the Mac, or the ledger
+      resets and several hundred already-watched videos get re-added at 50 units each.

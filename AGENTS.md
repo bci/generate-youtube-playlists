@@ -111,14 +111,52 @@ The hard rules live in [CLAUDE.md](CLAUDE.md) §11 (quota and real-account write
   (uploads listing, Shorts probe) are per channel; don't move them behind the seam.
 - No addresses, ids or channel names in tracked files.
 
-## Worklog / versions discipline
+## Worklog / versions / features discipline
 
-[WORKLOG.md](WORKLOG.md) and [VERSIONS.md](VERSIONS.md) are load-bearing, not afterthoughts.
-Update both in the same session as the change — don't defer to a "docs" commit. Use absolute
-dates (e.g. `2026-08-28`), never relative ones.
+[WORKLOG.md](WORKLOG.md), [VERSIONS.md](VERSIONS.md) and [features.yaml](features.yaml) are
+load-bearing, not afterthoughts. Update them in the same session as the change — don't defer
+to a "docs" commit. Use absolute dates (e.g. `2026-09-12`), never relative ones.
 
-Durable prompts describing the system live in [docs/prompts/](docs/prompts/). When behaviour
-changes in a way that makes a prompt wrong, update the prompt in the same change.
+They answer different questions, so most changes touch more than one:
+
+| File | Answers |
+| ---- | ------- |
+| `WORKLOG.md` | What was done, and **why** it is shaped that way |
+| `VERSIONS.md` | What shipped, and in which release |
+| `features.yaml` | What exists and what is still planned, under stable ids |
+
+### `features.yaml`
+
+The structured rollup — it exists so "is the Shorts split done?" or "what is left for
+macOS?" can be answered without reading the source. Its own header comment carries the full
+schema. The rules that matter when editing it:
+
+- **One entry per feature. `id` is `FEAT-NNNN`, zero-padded, and never renumbered** — ids
+  are referenced from prompts, commit messages and the other repo's manifests. A new
+  feature takes the next free id, so ids ascend with `added:`.
+- `status` is one of `planned | in-dev | in-test | complete | deferred`.
+- `release` names the VERSIONS.md release that *last* changed the feature, or `Unreleased`
+  when its newest change hasn't shipped.
+- Bump the top-level `updated:` whenever the file changes.
+- `notes:` is where the caveats and known limits go — a feature marked `complete` with a
+  real limitation is honest; one marked `complete` that quietly isn't, is not.
+- **It must stay valid YAML.** Verify after editing, e.g.
+  `python -c "import yaml,sys; yaml.safe_load(open('features.yaml',encoding='utf-8'))"`.
+  Nothing enforces this automatically — there is no CI for it in this repo.
+
+When a feature lands, the change that lands it also moves its entry to `complete` and sets
+`release` and `updated`. A feature is not done while its entry still says `planned`.
+
+### Prompts
+
+Durable prompts describing the system live in [docs/prompts/](docs/prompts/), in two genres,
+and it matters which one you are writing:
+
+- **Current state** (e.g. `prompt-youtube-playlist-sync-v1.md`) — describes the system as it
+  *is*. When behaviour changes in a way that makes one wrong, update it in the same change.
+- **Implementation brief** (e.g. `prompt-macos-support-v1.md`) — describes work *not yet
+  done*, and names the `FEAT-NNNN` it tracks. When that work lands, supersede the brief with
+  a `-v2` describing what shipped, and fold the durable parts into the current-state prompt.
 
 ## What Claude should do by default
 

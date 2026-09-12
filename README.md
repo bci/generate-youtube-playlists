@@ -520,7 +520,8 @@ git config core.hooksPath .githooks
 | `config/channels.txt`   | Your recurring channel list — git-ignored         |
 | `.env`                  | All secrets (Google OAuth + Microsoft Graph) — git-ignored |
 | `AGENTS.md`, `CLAUDE.md` | Project context and working rules for AI agents |
-| `WORKLOG.md`, `VERSIONS.md` | What changed, and when                      |
+| `WORKLOG.md`, `VERSIONS.md` | What changed and why, and what shipped when |
+| `features.yaml`         | Feature manifest — what exists, what is planned   |
 | `docs/prompts/`         | Durable prompts describing the system             |
 | `LICENSE`               | MIT license                                       |
 
