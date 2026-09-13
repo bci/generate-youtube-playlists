@@ -130,6 +130,10 @@ npm start -- --email
 | `--ignore-watched` | Skip watched detection entirely. Already-pruned videos are still never re-added. |
 | `--unlike`        | Clear the like after deleting a watched video (+50 units each).           |
 | `--max-removals=N` | Delete at most N videos this run, across all channels.                  |
+| `--claim-sync`    | Take over this account's [sync marker](#the-sync-marker) from another machine. Terminal only. |
+| `--after=YYYY-MM-DD` | Only collect videos published on or after this day. |
+| `--older=keep\|remove` | What to do with videos already in a playlist that fall below the cutoff. `keep` is the escape hatch for trying a cutoff on a real run. |
+| `--shorts=no\|yes\|only\|split` | How to treat Shorts. `split` gives each channel a second, Shorts-only playlist. |
 | `--config=PATH`   | Use a different channel list file.                                       |
 
 ### Adding channels to the recurring list
@@ -257,6 +261,39 @@ Watched videos are deleted as part of every run — see
 > `config/channels.txt`) to the new machine, **then** disable the old machine's jobs —
 > `Disable-ScheduledTask "YouTube Playlist Sync"` and its watchdog on Windows,
 > `sudo launchctl bootout system/local.youtube-playlists.sync` and its watchdog on macOS.
+
+### The sync marker
+
+Because that rule is easy to break by accident and expensive when broken, each run leaves
+a claim where the *other* machine can see it: a private, empty playlist named
+**`gyp-sync-<machine>`**, keyed to the hostname. It holds no videos and is ignored by
+everything else.
+
+| What the run finds | What it does |
+| ------------------ | ------------ |
+| No marker | Creates its own. 50 units, once ever. Not on `--dry-run`. |
+| Its own marker | Nothing at all — the normal case, every night. |
+| Another machine's marker | **Reports it** in the console, `report.html` and the email. The sync still runs. |
+
+It reports rather than refuses on purpose: a marker can be stale through nobody's fault —
+a retired machine that was never cleaned up, or a hostname changed by a new network — and a
+guard that stopped the nightly sync on a false positive would be worse than the problem.
+
+To take over an account (after disabling the sync on the other machine):
+
+```sh
+npm start -- --claim-sync
+```
+
+**`--claim-sync` only works from a terminal.** Run from a scheduled job it exits with an
+error, before touching the network. That is what keeps two machines from taking the account
+back from each other every night at 50 units a write — the flag cannot be put in
+`run-sync.sh`, a plist or a Scheduled Task and have any effect. If both markers already
+exist, delete the other one by hand in the YouTube UI instead; the next run re-claims.
+
+> **It only helps once every machine runs a build that has it.** A machine on an older
+> version syncs on happily and is never reported. Until both are updated, the marker tells
+> you "another machine was here", never "no other machine is here".
 
 ### Windows
 
@@ -601,6 +638,7 @@ git config core.hooksPath .githooks
 | `src/email.js`          | Microsoft Graph report sender                     |
 | `src/report.js`         | Shared HTML report builder                        |
 | `src/seen.js`           | Watched-video ledger (removal = watched)          |
+| `src/marker.js`         | Sync marker — which machine owns this account      |
 | `state/*.json`          | Per-channel watched ledger — local, git-ignored   |
 | `src/auth.js`           | Google OAuth2 (built from .env vars)             |
 | `src/authorize.js`      | One-time browser authorization                   |

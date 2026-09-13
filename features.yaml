@@ -197,3 +197,43 @@ features:
       remains the live host, because invariant 10 allows one machine per account. The Mac's
       heartbeat going stale is expected, not a fault.
 
+  - id: FEAT-0010
+    title: Sync marker playlist - detect a second machine syncing this account
+    description: >
+      Leave a private, empty marker playlist named gyp-sync-<key> on the account, so a run
+      can tell whether another installation of this tool already owns it. A foreign marker
+      is reported in the console, report.html and the email; --claim-sync takes ownership by
+      renaming it. The sync is never blocked.
+    components: [core, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-12
+    updated: 2026-09-12
+    notes: >
+      Built 2026-09-12 to the spec in docs/prompts/prompt-sync-marker-v1.md. Makes invariant 10 of the sync prompt
+      (exactly one machine syncs an account) observable rather than merely documented - two
+      schedulers on one account trade videos back and forth at 50 units a write, and the
+      symptom looks trivial next to the cost. Detection is ~1 unit per run (playlists.list
+      is 1 unit per page, and findPlaylistByTitle already pages that same list once per
+      playlist); creation is 50 units once; --claim-sync is 50 more, only when asked.
+      Three design choices worth not relitigating: replacement must stay explicit, because
+      two machines that both auto-replace flap forever at 50 units a write; --claim-sync is
+      interactive-only (fatal when stdin is not a TTY), which makes that flap unreachable
+      even by misconfiguration since the flag cannot work from a plist or a Scheduled Task;
+      and the key is the hostname rather than a uuid in state/, because the documented
+      host-move procedure copies state/ across, which would give both machines the same key
+      and defeat the guard in exactly the case it exists for. Known limit: it only helps once every machine runs
+      a build that writes the marker.
+      Implemented as src/marker.js (pure: classifyMarker/checkClaimSync/machineKey take
+      data and return decisions) plus listMyPlaylists/renamePlaylist in src/youtube.js and
+      the phase-1 check in src/index.js. 23 new tests, 148 total, lint clean.
+      Verified against the live account on 2026-09-12: the TTY refusal exits 1 before any
+      API call (node src/index.js --claim-sync < /dev/null); a planted gyp-sync-otherbox
+      was detected, named in the console, the summary and the report banner, and paged
+      ERROR_ALERT_TO rather than the report audience, while the sync ran normally;
+      --claim-sync from a terminal renamed it to gyp-sync-thisbox, leaving exactly one
+      marker with the SAME playlist id - proof it renamed rather than delete+insert, so 50
+      units and not 100. npm start -- --claim-sync preserves stdin's TTY, so the form the
+      README documents works. The create-on-first-run branch is covered by a mocked client
+      rather than live, since exercising it for real would cost 100 units to test three
+      lines.

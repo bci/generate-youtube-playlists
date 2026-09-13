@@ -57,9 +57,10 @@ Violating any of these is a bug, however good the reason looks:
     a second scheduler starts from a copy that is correct only until the next video is
     watched — after which the stale side re-adds what the live side pruned, and the two
     trade the video back and forth at 50 units a write, nightly. That is invariant 1 broken
-    by deployment rather than by code, which is why it cannot be enforced in code: nothing
-    in a run can see the other machine. Moving hosts means copying `state/` across *and*
-    disabling the old host's jobs, in that order.
+    by deployment rather than by code. It cannot be *enforced* in code, because nothing in a
+    run can see the other machine — but it is made **observable** by the sync marker (§5a):
+    a claim left on the account, which is the one place both machines can look. Moving hosts
+    means copying `state/` across *and* disabling the old host's jobs, in that order.
 
 ## 3. The run, in phases
 
@@ -209,6 +210,31 @@ recreated), the ledger resets instead of declaring every video watched — in bo
 a baseline and marks nothing; a video the *channel* deleted is not counted as watched,
 because it could never be re-added anyway.
 
+## 5a. The sync marker (`src/marker.js`)
+
+A private, empty playlist named `gyp-sync-<hostname>` recording which machine owns the
+nightly sync for this account. No marker → create one (50 units, once). Our own marker →
+silence, which is every normal night. Someone else's → report it in the console, the report
+and the email, and **keep syncing**.
+
+Detection is ~1 unit: `playlists.list` is 1 per page of 50, and the run already pages that
+same list once per playlist through `findPlaylistByTitle`. The marker is matched on a
+*prefix*, which that exact-match search cannot answer, hence `listMyPlaylists()`.
+
+Three properties are load-bearing and easy to undo by accident:
+
+- **It reports, never blocks.** A marker can be stale through nobody's fault — a retired
+  machine, or a hostname changed by a new network. A guard that stopped the nightly sync on
+  a false positive would be a worse failure than the one it prevents.
+- **`--claim-sync` is refused without a TTY** (`checkClaimSync`), tested on `stdin` rather
+  than `stdout`, since running a wrapper by hand redirects stdout to a log while stdin stays
+  a terminal. This is what makes the flap *unreachable* rather than discouraged: two
+  machines that could both claim automatically would take the account back from each other
+  nightly at 50 units a write. The flag cannot work from launchd or Task Scheduler.
+- **The key is the hostname, not a uuid in `state/`.** The host-move runbook copies `state/`
+  across, so a stored id would give both machines the same key and detect nothing, in exactly
+  the case the guard exists for.
+
 ## 6. Shorts exclusion
 
 `partitionShorts()`. Runs for every mode but `shorts=yes` (§3a), and returns both halves —
@@ -249,6 +275,7 @@ npm start -- [@handle ...] [flags]        # no handle = every channel in config/
 | `--email-on-change` | Email only on real progress; errors and watched previews go to `ERROR_ALERT_TO` instead. What the scheduled task runs. |
 | `--max=N` | At most N adds per channel this run. |
 | `--max-removals=N` | At most N deletions this run, across all channels (both reasons). `0` means none. |
+| `--claim-sync` | Take this account's marker over from another machine (§5a). Terminal only: fatal without a TTY, before any API call. |
 | `--after=YYYY-MM-DD` | Run-wide publish-date cutoff; overrides the dates in the channel list. |
 | `--older=keep|remove` | Run-wide `older=`. `keep` gates additions on the cutoff but deletes nothing, disarming an `older=remove` for one run without needing `--dry-run`. |
 | `--shorts=no|yes|only|split` | Run-wide `shorts=`; overrides the channel list. |
@@ -309,6 +336,9 @@ without a clock, a mailbox or an API key.
 - **The ledger is local to one machine** and git-ignored. Deleting `state/` loses the watched
   history and re-baselines on the next run, and running two machines against one account
   breaks invariant 10.
+- **The sync marker only sees machines that write one.** A machine running a build from
+  before §5a syncs on happily and is never reported, so the marker can say "another machine
+  was here" but never "no other machine is here".
 - **Videos added to a playlist by hand from another channel** are invisible to the tool: it
   only ever reasons about the uploads of the channel that playlist belongs to.
 - **Unattended scheduling is per-platform, and the wrappers are the only platform-specific

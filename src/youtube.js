@@ -134,6 +134,48 @@ export async function findPlaylistByTitle(youtube, title) {
   return null;
 }
 
+/**
+ * Every playlist on the account, id + title.
+ *
+ * 1 unit per page of 50, so effectively free — and the run already pays this several
+ * times over, since findPlaylistByTitle pages the same list once per playlist looking
+ * for an exact title. This exists because the sync marker is matched on a *prefix*,
+ * which that early-returning exact-match search cannot answer.
+ */
+export async function listMyPlaylists(youtube) {
+  const out = [];
+  let pageToken;
+  do {
+    const res = await youtube.playlists.list({
+      part: ['snippet'],
+      mine: true,
+      maxResults: 50,
+      pageToken,
+    });
+    for (const pl of res.data.items || []) {
+      out.push({ id: pl.id, title: pl.snippet?.title || '' });
+    }
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  return out;
+}
+
+/**
+ * Rename a playlist (50 units). Used only to take over a sync marker.
+ *
+ * playlists.update replaces the snippet rather than patching it, so the description
+ * has to be resent or it is cleared. That is safe here precisely because this is only
+ * ever called on a marker, whose description this tool owns; do not reach for it to
+ * rename a channel playlist without handling that.
+ */
+export async function renamePlaylist(youtube, playlistId, title, description) {
+  const res = await youtube.playlists.update({
+    part: ['snippet'],
+    requestBody: { id: playlistId, snippet: { title, description } },
+  });
+  return { id: res.data.id, title: res.data.snippet.title };
+}
+
 export async function createPlaylist(youtube, title, description) {
   const res = await youtube.playlists.insert({
     part: ['snippet', 'status'],

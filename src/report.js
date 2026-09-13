@@ -94,7 +94,7 @@ export function statusNote(s) {
  * comes from configuration (ACCOUNT_LABEL), never a hard-coded address — this file is
  * public and the report is not.
  */
-export function buildHtml(summaries, { dryRun = false, account = '' } = {}) {
+export function buildHtml(summaries, { dryRun = false, account = '', warning = '' } = {}) {
   const now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   // Only explain cutoffs when one is actually in play — the footnote is for the
   // reader wondering why a channel's total dropped, not a permanent disclaimer.
@@ -121,9 +121,18 @@ export function buildHtml(summaries, { dryRun = false, account = '' } = {}) {
     })
     .join('\n');
 
+  // Above the table, not in it: this is about the whole account, not one playlist, and
+  // it is the reason the mail was sent at all.
+  const banner = warning
+    ? `<p style="margin:0 0 16px;padding:12px;border-left:4px solid #b00;background:#fff4f4;color:#b00">
+    <strong>⚠️ ${esc(warning)}</strong>
+  </p>`
+    : '';
+
   return `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#222">
   <h2>YouTube Playlists${dryRun ? ' (dry run)' : ''}</h2>
   <p style="color:#666">Generated ${esc(now)}${account ? ` — account: ${esc(account)}` : ''}</p>
+  ${banner}
   <table cellpadding="8" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px">
     <thead>
       <tr style="background:#f2f2f2;text-align:left">

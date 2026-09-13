@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getAuthorizedClient } from './auth.js';
@@ -10,7 +11,17 @@ import {
   applyRemovals,
   getLikedVideoIds,
   getWatchedPlaylistIds,
+  listMyPlaylists,
+  createPlaylist,
+  renamePlaylist,
 } from './youtube.js';
+import {
+  machineKey,
+  markerTitle,
+  classifyMarker,
+  checkClaimSync,
+  conflictMessage,
+} from './marker.js';
 import { loadLedger, saveLedger } from './seen.js';
 import { writeHeartbeat } from './heartbeat.js';
 import { sendReport } from './email.js';
@@ -42,6 +53,13 @@ const ACCOUNT_LABEL = process.env.ACCOUNT_LABEL || '';
 const SHORTS_MODES = ['no', 'yes', 'only', 'split'];
 const REPORT_SUBJECT = 'YouTube Playlists — Update';
 const ERROR_SUBJECT = 'YouTube Playlists — sync error';
+const MARKER_SUBJECT = 'YouTube Playlists — another machine is syncing this account';
+// Written into the marker playlist itself, because the person who finds an unexplained
+// empty playlist on their account will look here before they look in a repo.
+const MARKER_DESCRIPTION =
+  'Marker left by generate-youtube-playlists so it can tell whether another machine is ' +
+  'already syncing this account. Empty on purpose. Deleting it makes the next run claim ' +
+  'the account again.';
 const WATCHED_SUBJECT = 'YouTube Playlists — watched videos detected (preview)';
 
 /**
@@ -68,6 +86,7 @@ export function parseArgs(argv) {
     unlike: false,
     maxRemovals: Infinity,
     watchedPlaylist: 'Watched',
+    claimSync: false,
     after: null,
     older: null,
     shorts: null,
@@ -83,6 +102,7 @@ export function parseArgs(argv) {
     else if (arg === '--ignore-watched') opts.ignoreWatched = true;
     else if (arg === '--report-watched') opts.reportWatched = true;
     else if (arg === '--unlike') opts.unlike = true;
+    else if (arg === '--claim-sync') opts.claimSync = true;
     else if (arg.startsWith('--max-removals='))
       opts.maxRemovals = parseLimit(arg.slice(15), arg);
     else if (arg.startsWith('--watched-playlist='))
@@ -339,8 +359,11 @@ export function summaryLine(s) {
     .join('  ');
 }
 
-function printConsole(summaries) {
+function printConsole(summaries, warning) {
   console.log('\n=== Summary ===');
+  // Repeated at the end as well as where it was found: phase 1 scrolls a long way up
+  // on a seven-playlist run, and this is the line that must not be missed.
+  if (warning) console.log(`  ⚠️  ${warning}\n`);
   for (const s of sortByChannel(summaries)) {
     if (s.error) {
       console.log(`  ${s.handle.padEnd(20)}  ERROR: ${s.error}`);
@@ -351,8 +374,103 @@ function printConsole(summaries) {
   }
 }
 
+/**
+ * Claim this account, or report that another machine already holds it.
+ *
+ * Runs in phase 1, before any write, and returns the warning to carry into the report
+ * and the email — or null when there is nothing to say, which is every normal night.
+ *
+ * A conflict never stops the run. The marker can be wrong in ways that are nobody's
+ * mistake (a machine retired without deleting its marker; a hostname changed by a new
+ * network), and a guard that stops the nightly sync on a false positive would be this
+ * project's own favourite failure mode, self-inflicted. It reports instead.
+ */
+export async function checkSyncMarker(youtube, opts) {
+  const key = machineKey(os.hostname());
+  const ourTitle = markerTitle(key);
+
+  let playlists;
+  try {
+    playlists = await listMyPlaylists(youtube);
+  } catch (err) {
+    // The guard must never be the reason the sync fails.
+    console.warn(`\n⚠️  Could not check the sync marker: ${cleanErr(err)}`);
+    return null;
+  }
+
+  const found = classifyMarker(playlists, key);
+
+  // The normal case, every night: our own claim, already there. Say nothing.
+  if (found.state === 'ours') return null;
+
+  if (found.state === 'none') {
+    if (opts.dryRun) {
+      console.log(`\n(--dry-run) Would claim this account as "${ourTitle}".`);
+      return null;
+    }
+    try {
+      await createPlaylist(youtube, ourTitle, MARKER_DESCRIPTION);
+      console.log(`\nClaimed this account as "${ourTitle}".`);
+    } catch (err) {
+      // 50 units that did not land. Worth a line, not worth failing the run.
+      console.warn(`\n⚠️  Could not create the sync marker: ${cleanErr(err)}`);
+    }
+    return null;
+  }
+
+  const message = conflictMessage(found);
+
+  if (!opts.claimSync) {
+    console.warn(`\n⚠️  ${message}`);
+    return message;
+  }
+
+  if (opts.dryRun) {
+    console.log(`\n(--dry-run) Would claim this account as "${ourTitle}".`);
+    return message;
+  }
+
+  // Our marker is already there alongside someone else's, so there is nothing to
+  // rename onto — two playlists would end up with the same title. Deleting the other
+  // one is the user's call, and costs them nothing in the YouTube UI.
+  if (found.ours) {
+    console.warn(
+      `\n⚠️  ${message}\n   --claim-sync cannot help here: "${ourTitle}" already exists. ` +
+        'Delete the other marker playlist by hand.'
+    );
+    return message;
+  }
+
+  const [take, ...rest] = found.foreign;
+  try {
+    await renamePlaylist(youtube, take.id, ourTitle, MARKER_DESCRIPTION);
+    console.log(`\n(--claim-sync) Took over "${take.title}" → "${ourTitle}".`);
+  } catch (err) {
+    console.warn(`\n⚠️  Could not claim the sync marker: ${cleanErr(err)}`);
+    return message;
+  }
+  if (rest.length) {
+    // Three or more machines. One rename per run, deliberately: claiming is the
+    // expensive direction, and a loop of them is the thing this flag must not become.
+    console.warn(
+      `\n⚠️  ${rest.length} other marker(s) remain. Run --claim-sync again, or delete them by hand.`
+    );
+    return message;
+  }
+  return null;
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+
+  // Before anything reaches the network: --claim-sync from a scheduled job is an
+  // operator error, never an intention, so it stops here rather than being ignored
+  // nightly for a year. A malformed channel setting is treated the same way.
+  const claimRefusal = checkClaimSync(opts, Boolean(process.stdin.isTTY));
+  if (claimRefusal) {
+    console.error(`\n❌ ${claimRefusal}`);
+    process.exit(1);
+  }
 
   // A channel named on the command line has no config line, so --after= is the only
   // way to give it a cutoff; without one it means the whole channel, as it always did.
@@ -384,6 +502,10 @@ async function main() {
 
   const auth = await getAuthorizedClient();
   const youtube = makeYouTube(auth);
+
+  // Before the channels: whose account is this? One list call, and it decides nothing
+  // about what the run does — only what the report says at the end.
+  const markerWarning = await checkSyncMarker(youtube, opts);
 
   // --report-watched detects and reports watched videos but deletes nothing and
   // leaves add behaviour alone; --prune-watched actually removes them.
@@ -575,7 +697,11 @@ async function main() {
     }
   }
 
-  const html = buildHtml(summaries, { dryRun: opts.dryRun, account: ACCOUNT_LABEL });
+  const html = buildHtml(summaries, {
+    dryRun: opts.dryRun,
+    account: ACCOUNT_LABEL,
+    warning: markerWarning,
+  });
   await fs.writeFile(REPORT_PATH, html);
 
   // Heartbeat for the watchdog (src/watchdog.js). A dry run is not a real run, so it
@@ -590,7 +716,7 @@ async function main() {
       errors: summaries.filter((s) => s.error).length,
     });
   }
-  printConsole(summaries);
+  printConsole(summaries, markerWarning);
   console.log(`\nHTML report written to: ${REPORT_PATH}`);
 
   if (opts.dryRun) {
@@ -598,13 +724,17 @@ async function main() {
   } else {
     const hasProgress = summaries.some((s) => s.added > 0 || s.removed > 0 || s.quotaHit);
     const hasError = summaries.some((s) => s.error);
+    // A conflict that only reaches report.html is a warning nobody reads — the file
+    // sits on a machine nobody logs into. It pages the operator like an error does.
+    const hasConflict = Boolean(markerWarning);
 
     // The report audience hears about progress: always on --email, or on
     // --email-on-change when a run made real playlist progress (videos added, or
     // quota reached mid-fill).
     const emailReport = opts.email || (opts.emailOnChange && hasProgress);
-    // Failures page the operator instead, on the unattended --email-on-change path.
-    const alertOperator = opts.emailOnChange && hasError;
+    // Failures page the operator instead, on the unattended --email-on-change path,
+    // and so does another machine syncing this account.
+    const alertOperator = opts.emailOnChange && (hasError || hasConflict);
     // While removals are preview-only, the watched report goes to the operator
     // rather than the report audience, whose mail stays reserved for progress. An
     // error alert already carries the same report, so don't send twice.
@@ -613,6 +743,7 @@ async function main() {
     const previewOperator =
       opts.emailOnChange &&
       !hasError &&
+      !hasConflict &&
       summaries.some(
         (s) =>
           s.previewRemovals &&
@@ -641,8 +772,9 @@ async function main() {
 
     if (alertOperator) {
       try {
-        const from = await sendReport({ to: ERROR_ALERT_TO, subject: ERROR_SUBJECT, html });
-        console.log(`\n⚠️  Error alert emailed from ${from} to ${ERROR_ALERT_TO}.`);
+        const subject = hasError ? ERROR_SUBJECT : MARKER_SUBJECT;
+        const from = await sendReport({ to: ERROR_ALERT_TO, subject, html });
+        console.log(`\n⚠️  Alert emailed from ${from} to ${ERROR_ALERT_TO}.`);
       } catch (err) {
         console.error(`\n❌ Error-alert email failed: ${cleanErr(err)}`);
         process.exitCode = 1;

@@ -4,6 +4,111 @@ Newest first. Absolute dates only.
 
 ## 2026-09-12 (later still)
 
+### Sync marker built — FEAT-0010
+
+Implemented to the brief written earlier the same day; nothing in the design changed on
+contact with the code, which is worth noting because the brief was written before reading
+`findPlaylistByTitle` and could easily have been wrong about the cost.
+
+**Where the pieces went.** `src/marker.js` holds the decisions and is pure —
+`classifyMarker`, `checkClaimSync`, `machineKey` take data and return data, so the entire
+rule is tested with arrays of strings and no mocked pagination. `src/youtube.js` gained
+`listMyPlaylists` (the marker is matched on a *prefix*, which the existing early-returning
+exact-title search cannot answer) and `renamePlaylist`. `src/index.js` calls the check once,
+after the client is built and before the channels are read.
+
+**`playlists.update` replaces the snippet rather than patching it**, so the description has
+to be resent or it is silently cleared. That is safe only because this is called on a marker
+whose description the tool owns, and the comment on `renamePlaylist` says so — reaching for
+it to rename a channel playlist would quietly wipe a description.
+
+**Three small decisions that are easy to get wrong:**
+
+- **An empty hostname must not yield a bare `gyp-sync-`**, which would prefix-match every
+  marker as ours and inverts the guard into the opposite of a guard. `machineKey('')` returns
+  `unknown`, and there is a test that says why.
+- **A foreign marker wins even when ours is also present.** Two markers means two
+  installations whichever one we are, and it is exactly the state a half-finished host move
+  leaves behind. `--claim-sync` refuses that case rather than renaming, since renaming would
+  leave two playlists with the same title; deleting the other by hand is free.
+- **The hostname's domain is dropped.** macOS reports `name.local` on one network and
+  `name.lan` on another, and a key that moved with the DHCP lease would report a conflict
+  against itself.
+
+**Verified against the live account.** The TTY refusal exits 1 before any API call, tested
+the way it will actually fail (`node src/index.js --claim-sync < /dev/null`) rather than by
+reasoning about it. A `gyp-sync-otherbox` marker was then planted on the account — via the
+same `createPlaylist` the tool uses, not by hand in the UI — and a run detected it, named
+the machine in the console, the summary and the report banner, paged `ERROR_ALERT_TO` rather
+than the report audience, and **still synced**. `--claim-sync` from a terminal renamed it to
+`gyp-sync-thisbox`.
+
+The detail worth keeping from that: the surviving marker has the **same playlist id** as the
+planted one, which is the evidence that it renamed rather than deleted and recreated — 50
+units instead of 100. And `npm start -- --claim-sync` preserves stdin's TTY, so the form the
+README documents does work; that was worth testing rather than assuming, since if npm had
+interfered the guard would have refused legitimate claims and looked like a bug in the rule.
+
+**The create-on-first-run branch is tested with a mocked client, not live**, because
+exercising it for real means deleting the marker and letting a run rebuild it: 100 units to
+cover three lines. `test/marker-run.test.js` covers every branch that way — claim, silence,
+report, rename, the refuse-when-both-exist case, three machines, and a `playlists.list`
+failure, which must never be the reason the nightly dies. 23 new tests, 148 total.
+
+### The decision to build it — FEAT-0010
+
+Added the `features.yaml` entry and `docs/prompts/prompt-sync-marker-v1.md`. Nothing was
+built and no source file was touched, so there is no `VERSIONS.md` entry: FEAT-0010 is
+`planned` until the work lands.
+
+**Why it exists.** Invariant 10 (one machine per account) was written earlier today, and it
+is enforced by nothing — a run cannot see the other machine. The proposal is to leave the
+claim where the other machine *can* see it: a private, empty playlist named
+`gyp-sync-<key>`. A foreign key means another installation owns this account.
+
+The cost works out in its favour, which is why it is worth doing at all: `playlists.list` is
+1 unit per page and the account has one page, so detection is ~1 unit a run — and
+`findPlaylistByTitle` already pages that same list once per playlist, so the run pays this
+several times over already. Creation is 50 units, once, ever.
+
+**Two options were rejected, and the reasons are the part worth keeping:**
+
+- **Auto-replace a foreign marker.** The obvious behaviour, and it flaps: if both machines
+  replace on sight, the Mac renames the marker tonight and Windows renames it back tomorrow,
+  50 units a write, forever, with both sides looking locally correct. It is invariant 1's
+  delete/re-add loop wearing a different hat. It also defeats the point — the second machine
+  would assume ownership quietly and nobody would be told. So replacement is explicit,
+  behind `--claim-sync` — **and that flag is interactive-only, fatal when stdin is not a
+  TTY.** Explicitness alone is a convention, and conventions get automated away: nothing
+  stops someone adding `--claim-sync` to `run-sync.sh` or a plist to "fix" a nightly warning,
+  at which point both machines are auto-replacing again and the flap is back. Refusing
+  without a TTY makes the loop unreachable rather than merely discouraged. Taking an account
+  away from another machine is a decision a person makes once, in front of a terminal.
+
+  Two details that are easy to get wrong and are recorded in the brief: test
+  `process.stdin.isTTY`, not `stdout` — running a wrapper by hand redirects stdout into
+  `logs/sync.log` while stdin stays a terminal, so keying off stdout would refuse a
+  legitimate claim. And make it fatal before any API call rather than a warning that
+  continues: a foreign marker is a condition on the account and may be nobody's mistake, so
+  it reports; `--claim-sync` in a scheduled job is an operator error that is never what
+  anyone intended, so it should stop loudly the first night instead of being silently
+  ignored every night for a year.
+- **A generated uuid in `state/` as the key.** The natural choice, and it is defeated by our
+  own runbook: the host-move procedure says to copy `state/` across, so both machines would
+  carry the same key and detect nothing — in precisely the scenario the guard is for. The
+  hostname is used instead. It also stays correctly quiet for two checkouts on one machine,
+  and it names the offending box in the report, which is what you want to know at 7am. Its
+  weakness is that macOS renames itself on some network changes; that is only tolerable
+  because a conflict reports rather than blocks, so those two decisions stand or fall
+  together.
+
+**Reporting, not blocking**, for the same reason the watchdog exists: a false positive that
+silently stops the nightly sync would be this project's favourite failure mode, self-inflicted.
+
+Known limit, to be stated in the README when it ships: it only helps once *every* machine
+runs a build that writes the marker. Until the Windows box is updated, the marker can tell
+you "another machine was here" but never "no other machine is here".
+
 ### macOS scheduling — FEAT-0009
 
 Built what `docs/prompts/prompt-macos-support-v1.md` briefed: `run-sync.sh`,
@@ -62,7 +167,7 @@ spent re-adding deliberately deleted videos", and nothing else does.
 daemons were installed on the Mac long enough to verify them under launchd and then booted
 out, so as of 2026-09-12 nothing is scheduled on the Mac at all. That is deliberate and not
 a half-finished migration: invariant 10 allows exactly one machine per account, and leaving
-both scheduled overnight would have been exactly what invariant 10 forbids.
+both scheduled overnight would have been the very failure FEAT-0010 was written to detect.
 So `state/last-run.json` on the Mac will go stale, and that is expected rather than a
 symptom — do not go looking for a broken sync. The macOS support is finished and ready; it
 is waiting on a decision to move hosts, which is a separate act from building it.

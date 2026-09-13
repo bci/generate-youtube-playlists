@@ -4,7 +4,28 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
-## Unreleased — macOS scheduling (FEAT-0009)
+## Unreleased — macOS scheduling (FEAT-0009) and the sync marker (FEAT-0010)
+
+**Sync marker.** Each run leaves a private, empty playlist named `gyp-sync-<hostname>` on the
+account, recording which machine owns the nightly sync. No marker → create one (50 units,
+once). Its own → silence. **Another machine's → report it** in the console, `report.html` and
+the email, while still syncing normally. Detection costs ~1 unit, since `playlists.list` is 1
+per page and the run already pages that list for every playlist.
+
+It reports rather than blocks because a marker can be stale through nobody's fault — a
+retired machine, a hostname changed by a new network — and a guard that stopped the nightly
+sync on a false positive would be worse than what it prevents. `--claim-sync` takes an
+account over, and is **refused without a terminal**: that is what makes two machines claiming
+it back from each other nightly unreachable rather than merely discouraged, since the flag
+cannot work from launchd or Task Scheduler. The key is the hostname rather than a stored id,
+because the host-move runbook copies `state/` and a stored id would give both machines the
+same key. Known limit: it only sees machines running a build that writes a marker.
+
+Verified against the live account: a planted foreign marker was detected, reported in all
+three places and paged the operator while the sync ran on, and `--claim-sync` took it over —
+renaming the existing playlist rather than replacing it, so 50 units rather than 100.
+
+
 
 Second deployment platform, ops only: `src/` is unchanged, no dependency was added, and the
 125-test suite passes unmodified on macOS.
