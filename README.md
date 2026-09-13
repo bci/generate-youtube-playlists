@@ -1,6 +1,6 @@
 # Generate YouTube Playlists
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/Node-%E2%89%A5%2020.12-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/) [![YouTube Data API](https://img.shields.io/badge/YouTube%20Data%20API-v3-FF0000?logo=youtube&logoColor=white)](https://developers.google.com/youtube/v3) [![Scheduling: Windows](https://img.shields.io/badge/Scheduling-Windows-0078D4?logo=windows&logoColor=white)](#scheduling-windows)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/Node-%E2%89%A5%2020.12-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/) [![YouTube Data API](https://img.shields.io/badge/YouTube%20Data%20API-v3-FF0000?logo=youtube&logoColor=white)](https://developers.google.com/youtube/v3) [![Scheduling: Windows](https://img.shields.io/badge/Scheduling-Windows-0078D4?logo=windows&logoColor=white)](#windows) [![Scheduling: macOS](https://img.shields.io/badge/Scheduling-macOS-000000?logo=apple&logoColor=white)](#macos)
 
 Given a YouTube channel handle (e.g. `@SomeChannel`), this tool creates a **private**
 playlist on your YouTube account named after that channel and fills it with
@@ -14,7 +14,7 @@ it builds an HTML report table and can email it to the address you configure.
 - [Requirements](#requirements)
 - [One-time setup](#one-time-setup)
 - [Usage](#usage) — [flags](#flags), [per-channel settings](#per-channel-settings)
-- [Scheduling (Windows)](#scheduling-windows) — and [the watchdog](#the-watchdog)
+- [Scheduling](#scheduling) — [Windows](#windows), [macOS](#macos), and [the watchdog](#the-watchdog)
 - [Email](#email)
 - [Watched videos — delete once viewed](#watched-videos--delete-once-viewed)
 - [Quota — important for large channels](#quota--important-for-large-channels)
@@ -39,7 +39,7 @@ it builds an HTML report table and can email it to the address you configure.
 | **Node.js 20.12+** (20.12 / 21.7 or newer) | `process.loadEnvFile()` reads `.env` with no dependency; global `fetch` and `AbortSignal.timeout` are also assumed. Enforced by `engines` in `package.json`. |
 | **A Google account** to own the playlists | Every playlist is created, filled and pruned on this one account. |
 | **A Google Cloud project** with **YouTube Data API v3** enabled, plus an OAuth **Desktop app** client | The tool acts as a person, not a service account — playlists belong to an account. Setup below. |
-| **Windows** — *only* for the scheduled task | `run-sync.cmd`, `run-watchdog.cmd` and the Task Scheduler steps are Windows-specific. The Node code is cross-platform; on macOS/Linux drive `npm start` from cron instead. |
+| **Windows or macOS** — *only* for the scheduling | `run-sync.cmd` / `run-watchdog.cmd` drive two Windows Scheduled Tasks; `run-sync.sh` / `run-watchdog.sh` and the templates in `launchd/` drive two macOS LaunchDaemons. Only these wrappers are platform-specific — the Node code is cross-platform, so on Linux drive `npm start` from cron instead. |
 | **Microsoft 365 app registration** with `Mail.Send` — *optional* | Only for the emailed report. Without it, skip `--email` and read `report.html`. |
 
 Beyond that it is `npm install`. There is no database and no long-running service: the only
@@ -130,9 +130,6 @@ npm start -- --email
 | `--ignore-watched` | Skip watched detection entirely. Already-pruned videos are still never re-added. |
 | `--unlike`        | Clear the like after deleting a watched video (+50 units each).           |
 | `--max-removals=N` | Delete at most N videos this run, across all channels.                  |
-| `--after=YYYY-MM-DD` | Only collect videos published on or after this day. |
-| `--older=keep\|remove` | What to do with videos already in a playlist that fall below the cutoff. `keep` is the escape hatch for trying a cutoff on a real run. |
-| `--shorts=no\|yes\|only\|split` | How to treat Shorts. `split` gives each channel a second, Shorts-only playlist. |
 | `--config=PATH`   | Use a different channel list file.                                       |
 
 ### Adding channels to the recurring list
@@ -240,15 +237,30 @@ npm start -- --after=2026-01-01 --older=keep              # real run, no deletio
 without needing `--dry-run`.
 ---
 
-## Scheduling (Windows)
+## Scheduling
 
-Nothing here runs on its own — drive it from a Windows Scheduled Task pointing at
-[`run-sync.cmd`](run-sync.cmd). **3:00 AM** is the trigger worth picking: quota resets
-around midnight Pacific, so an early-morning run starts with the full budget. The wrapper
-syncs every channel in `config/channels.txt`, writes `report.html`, and appends its output
-to `logs/sync.log`. Watched videos are deleted as part of every run — see
+Nothing here runs on its own — a scheduler has to drive it. **3:00 AM** is the trigger worth
+picking on either platform: quota resets around midnight Pacific, so an early-morning run
+starts with the full budget. Whichever wrapper runs, it syncs every channel in
+`config/channels.txt`, writes `report.html`, and appends its output to `logs/sync.log`.
+Watched videos are deleted as part of every run — see
 [Watched videos](#watched-videos--delete-once-viewed).
 
+> **One machine per YouTube account — Windows *or* macOS, never both, and never two of
+> either.** The watched ledger lives in `state/` on the machine that wrote it, so a second
+> scheduler works from a copy that stays correct only until the next video is watched. After
+> that the stale side re-adds what the live side pruned, and the two trade the video back
+> and forth at 50 quota units per write, every night. Nothing in a run can detect the other
+> machine, so this is a deployment rule, not something the tool can enforce.
+>
+> Switching hosts is therefore two steps in order: copy `state/` (plus `.env` and
+> `config/channels.txt`) to the new machine, **then** disable the old machine's jobs —
+> `Disable-ScheduledTask "YouTube Playlist Sync"` and its watchdog on Windows,
+> `sudo launchctl bootout system/local.youtube-playlists.sync` and its watchdog on macOS.
+
+### Windows
+
+Drive it from a Windows Scheduled Task pointing at [`run-sync.cmd`](run-sync.cmd).
 Register it once, from the repo root:
 
 ```powershell
@@ -268,21 +280,101 @@ Register-ScheduledTask -TaskName "YouTube Playlist Sync" -Action $action -Trigge
 - The machine has to be awake at 3 AM. The task can be set to wake from sleep; it cannot
   power on a machine that is off.
 
+### macOS
+
+Two **LaunchDaemons** drive the shell wrappers [`run-sync.sh`](run-sync.sh) and
+[`run-watchdog.sh`](run-watchdog.sh). Templates for both live in [`launchd/`](launchd/);
+they carry placeholders for the repo path and the account to run as.
+
+> **Daemons, not Agents — this is the macOS version of the `-LogonType S4U` lesson above.**
+> A LaunchAgent runs only inside a logged-in GUI session, so on a shared machine where
+> nobody is signed in at 3 AM it is skipped in silence: no log, no error, no report, and it
+> looks exactly like the sync failing. A LaunchDaemon runs from boot regardless of who is
+> logged in. The `UserName` key is what keeps that from meaning *run as root* — the job
+> starts in the privileged system domain but executes as the named account, so `state/`,
+> `logs/` and `.env` keep their ownership instead of collecting root-owned files. Note that
+> `UserName` is honoured **only** in the system domain; it does nothing in an Agent.
+
+Install both, from the repo root:
+
+```sh
+mkdir -p logs   # launchd opens StandardOutPath before exec — a missing dir fails the job
+
+for job in sync watchdog; do
+  sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__RUN_AS_USER__|$(id -un)|g" \
+    "launchd/local.youtube-playlists.$job.plist" > "/tmp/$job.plist"
+  sudo install -o root -g wheel -m 644 "/tmp/$job.plist" \
+    "/Library/LaunchDaemons/local.youtube-playlists.$job.plist"
+  sudo launchctl bootstrap system "/Library/LaunchDaemons/local.youtube-playlists.$job.plist"
+done
+```
+
+> Files in `/Library/LaunchDaemons` **must be owned by `root:wheel` with mode 644** or
+> launchd refuses to load them — and it complains about the path's ownership, saying nothing
+> about your job, which is a confusing way to learn this. `install -o root -g wheel -m 644`
+> sets all three in one step.
+
+- Check it loaded: `sudo launchctl print system/local.youtube-playlists.sync`
+- Run it on demand: `sudo launchctl kickstart -k system/local.youtube-playlists.sync`
+- Remove it: `sudo launchctl bootout system/local.youtube-playlists.sync`
+- `launchctl load` / `unload` are the deprecated forms; `bootstrap` / `bootout` replace them.
+- **Node is resolved inside the wrappers, not by the plists.** A daemon's `PATH` is
+  `/usr/bin:/bin:/usr/sbin:/sbin`, and Homebrew installs node to `/opt/homebrew/bin` (Apple
+  Silicon) or `/usr/local/bin` (Intel) — neither is on it. A wrapper that simply calls
+  `node` therefore works every time you test it in a terminal and fails every night under
+  launchd. Each wrapper tries `PATH` first, then both Homebrew locations, logs which binary
+  it picked, and logs a `FATAL` line rather than dying quietly if it finds none.
+- A Mac **asleep** at 3 AM still syncs — launchd runs a missed calendar interval at the next
+  wake, coalescing several missed ones into a single run. A Mac that is **powered off** does
+  not. `sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00` is the analogue of the Windows
+  wake-from-sleep checkbox.
+- Keep the checkout out of `~/Desktop`, `~/Documents` and `~/Downloads`. Those are
+  TCC-protected, and a daemon reading them needs Full Disk Access granted by hand.
+
+#### Why a daemon, and not an Agent or cron
+
+Reasonable question, since both alternatives avoid `sudo`. Three things are easy to conflate:
+
+- **Running as you is not the root part.** `UserName` is launchd's equivalent of the Windows
+  task's `-LogonType S4U`: the job runs as your account, and every file it writes is owned by
+  you. Nothing at 3 AM runs as root.
+- **`sudo` is install-time only.** `/Library/LaunchDaemons` is `root:wheel` and launchd
+  refuses a plist there that isn't, so registering the job needs admin once. Running it never
+  does.
+- **The system domain is the part that needs admin, and it is needed for logged-out runs.**
+  A LaunchAgent loads into `gui/<uid>`, created when the user logs in at the GUI — no login,
+  no job. (`man launchctl` notes a `user/<uid>` domain "may exist independently of a
+  logged-in user", so an agent there is not flatly impossible; what is untested is a reboot
+  with nobody ever logging in, and being wrong about that means silently missed nights.)
+
+**cron would work without admin** — `/usr/bin/crontab` is setuid, so you can install your own
+crontab, and jobs run as you whether or not anyone is logged in. It is rejected for one
+reason, and it is not the deprecation: **cron silently skips a job whose time passed while
+the Mac was asleep.** launchd runs it at the next wake instead (§ `StartCalendarInterval` in
+`man launchd.plist`), coalescing several missed intervals into one run. For a 3 AM job on a
+machine that sleeps, cron turns a late run into a missed night with no record — the failure
+this project already learned to design against. If you do prefer cron, pair it with
+`sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00` so the machine is genuinely awake, and
+treat the watchdog as your only backstop.
+
 ### The watchdog
 
 A scheduled task that never fires writes no log, so its failure is invisible to anything
 that reads logs. Every completed sync therefore writes a heartbeat to
 `state/last-run.json`, and a second task watches *that*:
 
-```powershell
+```sh
 npm run watchdog -- --dry-run     # check staleness, send nothing
 npm run watchdog                  # email an alert if the sync has gone quiet
 ```
 
 It emails `ERROR_ALERT_TO` when the last successful run is older than **36 hours** —
 deliberately two missed nights, so one late run stays silent. `--max-age-hours=N` changes
-the threshold. Register [`run-watchdog.cmd`](run-watchdog.cmd) on its own trigger the same
-way as above, at a time when the sync has already had its chance to run.
+the threshold. Register [`run-watchdog.cmd`](run-watchdog.cmd) (Windows) or
+[`run-watchdog.sh`](run-watchdog.sh) (macOS) on its own trigger, the same way as above, at a
+time when the sync has already had its chance to run — the macOS template uses **09:00**.
+Its own trigger is the point: a watchdog sharing the sync's schedule is silent in exactly
+the case it exists to catch.
 
 ## Email
 
@@ -514,8 +606,11 @@ git config core.hooksPath .githooks
 | `src/authorize.js`      | One-time browser authorization                   |
 | `src/heartbeat.js`      | Writes/reads `state/last-run.json`; the staleness rule |
 | `src/watchdog.js`       | Alerts when the sync stops running at all         |
-| `run-sync.cmd`          | Scheduled-task wrapper for the nightly sync       |
-| `run-watchdog.cmd`      | Scheduled-task wrapper for the watchdog           |
+| `run-sync.cmd`          | Windows scheduled-task wrapper for the nightly sync |
+| `run-watchdog.cmd`      | Windows scheduled-task wrapper for the watchdog   |
+| `run-sync.sh`           | macOS LaunchDaemon wrapper for the nightly sync   |
+| `run-watchdog.sh`       | macOS LaunchDaemon wrapper for the watchdog       |
+| `launchd/*.plist`       | macOS LaunchDaemon templates (repo path + user are placeholders) |
 | `config/channels.example.txt` | Tracked template for the channel list       |
 | `config/channels.txt`   | Your recurring channel list — git-ignored         |
 | `.env`                  | All secrets (Google OAuth + Microsoft Graph) — git-ignored |

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchDaemon template: check the sync heartbeat at 09:00 every day.
+
+  This is a TEMPLATE. Replace the two placeholders before installing:
+    __REPO_DIR__      absolute path to this repo, e.g. /Users/you/generate-youtube-playlists
+    __RUN_AS_USER__   the account that owns the YouTube playlists and this checkout
+
+  Install (see the macOS section of README.md for the full sequence):
+    sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__RUN_AS_USER__|$(id -un)|g" \
+      launchd/local.youtube-playlists.watchdog.plist > /tmp/watchdog.plist
+    sudo install -o root -g wheel -m 644 /tmp/watchdog.plist \
+      /Library/LaunchDaemons/local.youtube-playlists.watchdog.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/local.youtube-playlists.watchdog.plist
+
+  Same daemon-not-Agent reasoning as the sync job, and it applies with more force here:
+  this job exists to notice that the sync stopped running, so it must run on nights when
+  nobody logs in - which is when an Agent would be skipped.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.youtube-playlists.watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__REPO_DIR__/run-watchdog.sh</string>
+    </array>
+
+    <key>UserName</key>
+    <string>__RUN_AS_USER__</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <!-- 09:00, six hours after the sync and on a separate trigger on purpose: a watchdog
+         sharing the sync's schedule is silent in exactly the case it exists to catch. The
+         gap also lets a slow or retrying sync finish before its heartbeat is judged. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__REPO_DIR__/logs/launchd.watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO_DIR__/logs/launchd.watchdog.err.log</string>
+
+    <!-- Harmless to run at load (it only reads a file and may send mail), but off for the
+         same reason as the sync: the schedule should be the only thing that triggers it. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

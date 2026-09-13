@@ -164,19 +164,36 @@ features:
   - id: FEAT-0009
     title: macOS support - launchd scheduling and shell wrappers
     description: >
-      Run the nightly sync and the watchdog unattended on macOS: shell equivalents of
-      the two .cmd wrappers, two launchd LaunchAgents replacing the Scheduled Tasks,
-      and a README section covering setup plus the state/ migration.
+      Run the nightly sync and the watchdog unattended on macOS: run-sync.sh and
+      run-watchdog.sh alongside the two .cmd wrappers, two LaunchDaemon templates in
+      launchd/ replacing the Scheduled Tasks, and a README section covering setup plus
+      the state/ migration.
     components: [ops]
-    status: planned
+    status: complete
     release: Unreleased
     added: 2026-09-12
     updated: 2026-09-12
     notes: >
-      Spec in docs/prompts/prompt-macos-support-v1.md. The Node code is already
-      platform-neutral (verified 2026-09-12 - no process.platform branching, all paths
-      built with path.join from __dirname), so this is an ops-only change and src/
-      should not need to change at all. .githooks/pre-push is already POSIX sh and
-      needs no port. The highest-risk step is the migration, not the scheduling:
-      state/ and .env must be copied BEFORE the first run on the Mac, or the ledger
-      resets and several hundred already-watched videos get re-added at 50 units each.
+      Built 2026-09-12; what shipped is described in docs/prompts/prompt-macos-support-v2.md
+      (v1 is the superseded brief). src/ was not touched and no dependency was added, as
+      predicted. Daemons rather than Agents, because the target is a shared family Mac where
+      nobody is logged in at 3 AM and an Agent would be skipped in silence - the macOS twin
+      of the -LogonType S4U lesson in FEAT-0008. UserName keeps a daemon from running as
+      root; it is honoured only in the system domain, so it is available precisely because
+      of that choice. Node is resolved inside the wrappers (PATH, then both Homebrew
+      locations) rather than via EnvironmentVariables, so a by-hand test exercises the same
+      code launchd will.
+      Verified end to end under launchd on 2026-09-12 16:08 via a temporary system-domain
+      daemon on a calendar trigger: it fired on time, resolved /opt/homebrew/bin/node through
+      the wrapper fallback (launchd's PATH has neither Homebrew location), ran as the
+      UserName account rather than root - report.html, logs/ and state/*.json all owned by
+      the user - added the 1 video the dry run predicted, emailed the report, and exited 0
+      with both launchd std logs empty. Also verified: wrappers by hand, watchdog quiet when
+      fresh and alerting when aged, 125 tests and lint clean on macOS 26.6.2 / Node 26.8.1.
+      The migration trap was cleared first: after copying .env, state/ and
+      config/channels.txt, a dry run proposed 1 insert across 7 playlists rather than the
+      hundreds an empty ledger would have.
+      Verified but NOT deployed: the daemons were booted out after testing and Windows
+      remains the live host, because invariant 10 allows one machine per account. The Mac's
+      heartbeat going stale is expected, not a fault.
+

@@ -4,6 +4,38 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
+## Unreleased — macOS scheduling (FEAT-0009)
+
+Second deployment platform, ops only: `src/` is unchanged, no dependency was added, and the
+125-test suite passes unmodified on macOS.
+
+**macOS unattended runs.** `run-sync.sh` and `run-watchdog.sh` are POSIX-sh mirrors of the
+two `.cmd` wrappers, driven by two **LaunchDaemons** built from the templates in `launchd/`
+(sync 03:00, watchdog 09:00). Daemons rather than Agents because the target is a shared
+machine where nobody is logged in at 3 AM, and an Agent — which lives in a GUI login session
+— would be skipped in silence on exactly those nights. That is the macOS form of the
+`-LogonType S4U` lesson the Windows task already carries. The `UserName` key keeps a daemon
+from meaning *root*, so `state/`, `logs/` and `.env` keep their ownership; it is honoured
+only in the privileged system domain, so it is available because of the Daemon choice rather
+than despite it.
+
+**The node-path trap, handled in the wrapper.** A launchd daemon's `PATH` is
+`/usr/bin:/bin:/usr/sbin:/sbin`, which contains neither Homebrew location, so a wrapper that
+calls plain `node` works every time it is tested in a terminal and fails every night under
+launchd. Both wrappers try `PATH`, then `/opt/homebrew/bin/node`, then `/usr/local/bin/node`,
+log which they picked, and log a `FATAL` line rather than dying quietly if they find none.
+
+**Plists are tracked as templates**, with `__REPO_DIR__` and `__RUN_AS_USER__` placeholders
+filled in by `sed` at install time — a working plist would otherwise commit an absolute home
+path and an account name to a public repo.
+
+**README** gained a `## Scheduling` section with `### Windows` (unchanged) and `### macOS`.
+
+**Verified under launchd** on 2026-09-12, on a real calendar trigger rather than a manual
+kickstart: the job fired on time, resolved node through the wrapper fallback, ran as the
+`UserName` account (every file it wrote is owned by that user, not root), made the one
+change the preceding dry run predicted, emailed the report, and exited 0.
+
 ## 2026.09.12 — 2026-09-12 (Initial release)
 
 First public version. The repository starts here; nothing precedes it.

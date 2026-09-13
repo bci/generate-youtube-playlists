@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchDaemon template: run the nightly sync at 03:00 every day.
+
+  This is a TEMPLATE. Replace the two placeholders before installing:
+    __REPO_DIR__      absolute path to this repo, e.g. /Users/you/generate-youtube-playlists
+    __RUN_AS_USER__   the account that owns the YouTube playlists and this checkout
+
+  Install (see the macOS section of README.md for the full sequence):
+    sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__RUN_AS_USER__|$(id -un)|g" \
+      launchd/local.youtube-playlists.sync.plist > /tmp/sync.plist
+    sudo install -o root -g wheel -m 644 /tmp/sync.plist \
+      /Library/LaunchDaemons/local.youtube-playlists.sync.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/local.youtube-playlists.sync.plist
+
+  A DAEMON, not an Agent, because nobody is logged in at 3 AM on a shared family Mac.
+  An Agent runs only inside a logged-in GUI session, so it would be skipped in silence on
+  exactly those nights - the same failure the Windows task hit before -LogonType S4U.
+
+  UserName is what keeps that from meaning "run as root": the daemon starts at boot in the
+  system domain but executes as the named account, so state/, logs/ and .env stay owned by
+  that user rather than acquiring root-owned files the user can no longer rewrite.
+  (UserName is honoured ONLY in the privileged system domain - it does nothing in an Agent.)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.youtube-playlists.sync</string>
+
+    <!-- /bin/sh explicitly rather than relying on the script's executable bit, which a
+         zip download or a restrictive umask can strip. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__REPO_DIR__/run-sync.sh</string>
+    </array>
+
+    <key>UserName</key>
+    <string>__RUN_AS_USER__</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <!-- 03:00: quota resets around midnight Pacific, so an early-morning run has the full
+         budget. launchd fires a missed interval on the next wake (several missed intervals
+         coalesce into one), so a Mac asleep at 3 AM still syncs - one that is powered off
+         does not. See pmset in the README. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- The wrapper already appends to logs/sync.log. These catch the case it cannot:
+         the wrapper itself failing to start, which would otherwise leave no record at all.
+         logs/ must exist before bootstrap - launchd opens these before exec. -->
+    <key>StandardOutPath</key>
+    <string>__REPO_DIR__/logs/launchd.sync.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO_DIR__/logs/launchd.sync.err.log</string>
+
+    <!-- Never on load. A sync writes to a real account at 50 quota units per change; it
+         should happen on the schedule, not every time the machine boots. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

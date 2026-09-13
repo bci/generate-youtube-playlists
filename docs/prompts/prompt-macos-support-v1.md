@@ -1,6 +1,10 @@
 # YT-MACOS-001 — macOS support: implementation brief
 
-**Status:** planned · **Written:** 2026-09-12 · **Applies to:** ops only · **Tracks:** FEAT-0009
+**Status:** SUPERSEDED by [prompt-macos-support-v2.md](prompt-macos-support-v2.md) (2026-09-12) · **Written:** 2026-09-12 · **Applies to:** ops only · **Tracks:** FEAT-0009
+
+> Kept for the reasoning behind the work, not as a description of it. The work landed on
+> 2026-09-12; read v2 for what was actually built, which differs from this brief in two
+> places (LaunchDaemons rather than Agents, and the `launchctl` invocation that implies).
 
 Unlike [prompt-youtube-playlist-sync-v1.md](prompt-youtube-playlist-sync-v1.md), which
 describes the system as it *is*, this document describes work that has **not been done**.

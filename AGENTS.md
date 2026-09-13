@@ -105,6 +105,9 @@ The hard rules live in [CLAUDE.md](CLAUDE.md) §11 (quota and real-account write
 - Test against the live account with `--dry-run`, then `--max=1`. Never a full sync.
 - A write costs 50 units; there are ~200 a day. Never retry a permanent failure.
 - A video the ledger knows is watched is never re-added, under any flag combination.
+- **One machine syncs an account** — Windows or macOS, never both. The ledger is per-machine,
+  so a second scheduler re-adds what the first pruned. A host move is: copy `state/`, then
+  disable the old host's jobs.
 - A cutoff deletion is *forgotten* by the ledger, never banked as a watch — otherwise
   lifting an `after=` date would hold those videos out for good.
 - One channel is read once however many playlists its line asks for. The expensive reads

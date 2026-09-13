@@ -16,3 +16,10 @@ config/channels.txt
 
 # Local watched-video ledger (per machine; see README "Watched videos")
 state/
+
+# macOS Finder metadata — turns up in any directory opened in the GUI
+.DS_Store
+
+# Local archives and downloads. Nothing in this project ships as a zip, so anything
+# matching here is something that wandered into the working tree, not a deliverable.
+*.zip

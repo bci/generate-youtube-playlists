@@ -52,6 +52,14 @@ Violating any of these is a bug, however good the reason looks:
 9. **A cutoff deletion is not a watch.** Deleting a video for falling below a channel's
    `after=` date removes its id from `known` rather than banking it in `seen`, so lifting
    the cutoff later backfills normally instead of holding the videos out for good.
+10. **Exactly one machine syncs a given YouTube account.** Windows or macOS, never both, and
+    never two of either. The ledger lives in `state/` on the machine that wrote it (§5), so
+    a second scheduler starts from a copy that is correct only until the next video is
+    watched — after which the stale side re-adds what the live side pruned, and the two
+    trade the video back and forth at 50 units a write, nightly. That is invariant 1 broken
+    by deployment rather than by code, which is why it cannot be enforced in code: nothing
+    in a run can see the other machine. Moving hosts means copying `state/` across *and*
+    disabling the old host's jobs, in that order.
 
 ## 3. The run, in phases
 
@@ -224,8 +232,9 @@ rather than dropping it.
 - **Anything permanent** → fatal to `withRetry`, per invariant 6.
 - **A channel that throws** → recorded on that channel's row; every other channel continues.
 - **Never running at all** → the sync cannot report this, so `src/watchdog.js` does: every
-  completed run writes `state/last-run.json`, and a separate scheduled task alerts when the
-  last success is older than 36 hours (two missed nights, so one late run stays silent).
+  completed run writes `state/last-run.json`, and a separate scheduled job — its own
+  trigger, never the sync's — alerts when the last success is older than 36 hours (two
+  missed nights, so one late run stays silent).
 
 ## 8. Interface
 
@@ -298,7 +307,14 @@ without a clock, a mailbox or an API key.
 - **A like is per-account.** On a shared account, someone liking a video because they enjoyed
   it marks it watched for everyone. The `Watched` playlist is the unambiguous alternative.
 - **The ledger is local to one machine** and git-ignored. Deleting `state/` loses the watched
-  history and re-baselines on the next run.
+  history and re-baselines on the next run, and running two machines against one account
+  breaks invariant 10.
 - **Videos added to a playlist by hand from another channel** are invisible to the tool: it
   only ever reasons about the uploads of the channel that playlist belongs to.
-- **Scheduled tasks are Windows-only.** The Node code is not.
+- **Unattended scheduling is per-platform, and the wrappers are the only platform-specific
+  files.** Windows drives `run-sync.cmd` / `run-watchdog.cmd` from two Scheduled Tasks;
+  macOS drives `run-sync.sh` / `run-watchdog.sh` from two LaunchDaemons built from the
+  templates in `launchd/`. Both platforms face the same trap in different dress — a job that
+  runs only when someone is logged in is skipped *in silence* on the nights nobody is, which
+  is why the Windows task needs `-LogonType S4U` and macOS needs a Daemon rather than an
+  Agent. Linux has no wrapper: drive `npm start` from cron.
