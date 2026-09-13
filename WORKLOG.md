@@ -224,6 +224,15 @@ because two Windows machines would break it just as thoroughly. Worth the three 
 because the symptom (a couple of videos reappearing) looks trivial next to its cost, so
 nobody would go looking for a rule about it.
 
+**A `.gitattributes` pins the new scripts to LF**, added the same day and before the Windows
+checkout pulled them. The repo had no line-ending rules at all, and the working tree is
+deliberately mixed, so the file stays narrow — `*.sh` and `*.plist` only, never `* text=auto`,
+which would renormalize exactly the files AGENTS.md says not to touch. Verified with
+`git check-attr` that nothing already tracked changes. Without it, a CRLF checkout on Windows
+committed back would give the Mac `/bin/sh^M: bad interpreter` at 3 AM, unattended — and that
+error reads as "the wrapper is broken" rather than "the line endings changed", which is the
+kind of misdirection that costs an evening.
+
 One unrelated thing noticed and deliberately not fixed: `npm install` rewrites
 `package-lock.json` (its `license` and `engines` are stale relative to `package.json`). That
 change was reverted to keep this diff to the task; it will reappear for whoever runs

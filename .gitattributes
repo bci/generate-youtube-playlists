@@ -1,0 +1,15 @@
+# Line endings for the files that break when they change.
+#
+# The working tree is deliberately mixed (some files CRLF, some LF) and git normalizes on
+# checkout, so this file stays narrow on purpose: it names only the two types that have a
+# real failure mode, rather than imposing `* text=auto` and renormalizing the whole repo.
+#
+# run-sync.sh / run-watchdog.sh are executed by launchd on macOS but live in a repo that is
+# also checked out on Windows. A shell script that picks up CRLF fails as
+# `/bin/sh^M: bad interpreter`, which reads as "the wrapper is broken" rather than "the line
+# endings changed" — and it would fail at 3 AM, unattended, where nobody is watching.
+*.sh    text eol=lf
+
+# The plists are XML and tolerate CRLF, but they are macOS-only files and travel with the
+# scripts; keeping the pair consistent means one rule to remember instead of two.
+*.plist text eol=lf
