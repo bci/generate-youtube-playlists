@@ -224,6 +224,12 @@ because two Windows machines would break it just as thoroughly. Worth the three 
 because the symptom (a couple of videos reappearing) looks trivial next to its cost, so
 nobody would go looking for a rule about it.
 
+**`docs/turnover/` is git-ignored**, and carried between machines by hand the way `.env` and
+`state/` already are. A turnover note names which host is live, which is idle and what each
+is scheduled to do — that is operational detail about a deployment, and this repo is public.
+It gets a row in the AGENTS.md state table rather than a tracked template, since like
+`state/` there is no schema to template; the note is prose written for one occasion.
+
 **A `.gitattributes` pins the new scripts to LF**, added the same day and before the Windows
 checkout pulled them. The repo had no line-ending rules at all, and the working tree is
 deliberately mixed, so the file stays narrow — `*.sh` and `*.plist` only, never `* text=auto`,

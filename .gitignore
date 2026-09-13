@@ -23,3 +23,8 @@ state/
 # Local archives and downloads. Nothing in this project ships as a zip, so anything
 # matching here is something that wandered into the working tree, not a deliverable.
 *.zip
+
+# Machine-to-machine handover notes. Transferred by hand alongside .env and state/,
+# because they name hosts, schedules and which machine is currently live — operational
+# detail about a deployment, not source.
+docs/turnover/

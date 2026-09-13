@@ -24,6 +24,7 @@ There is no server, no database and no build step. State is three things on disk
 | `config/channels.txt` | the channel list + each channel's `key=value` settings | no (`config/channels.example.txt` is) |
 | `state/*.json` | per-playlist watched ledger + `last-run.json` heartbeat | no |
 | `report.html`, `logs/` | last run's report and console log | no |
+| `docs/turnover/` | handover notes for whoever picks the work up on another machine | no |
 
 ## Layout
 
