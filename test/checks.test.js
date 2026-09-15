@@ -1,3 +1,7 @@
+// checks-allow: secrets — every credential and address below is a planted fixture. The
+// whole point of this file is proving the scanner rejects them, so weakening them to
+// example.com would delete the test. See allowsCheck() in checks.js.
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -9,6 +13,7 @@ import {
   checkIgnored,
   checkLinks,
   checkManifest,
+  allowsCheck,
   checkShims,
   checkTargetArgs,
   scanSecrets,
@@ -227,4 +232,23 @@ test('a scan that finds nothing reports itself rather than passing', () => {
   const found = checkDocumentedChecks('no calls here', '| Check | Level |\n');
   assert.equal(found.length, 1);
   assert.match(found[0].message, /scan in checkDocumentedChecks has broken/);
+});
+
+// The opt-out has to cost a reason, or it becomes the silent way past the one check that
+// guards an irreversible mistake.
+test('a file may opt out of a check only with a reason', () => {
+  assert.ok(allowsCheck('// checks-allow: secrets — planted fixtures', 'secrets'));
+  assert.ok(allowsCheck('# checks-allow: secrets - test data', 'secrets'));
+  assert.ok(!allowsCheck('// checks-allow: secrets', 'secrets'), 'a bare opt-out does not count');
+  assert.ok(!allowsCheck('// checks-allow: secrets —   ', 'secrets'), 'whitespace is not a reason');
+  assert.ok(!allowsCheck('// checks-allow: links — x', 'secrets'), 'an opt-out is per check');
+});
+
+// git ls-files sees a new file only after it is committed, so a secret added this session
+// would have been caught by the commit AFTER the one that leaked it.
+test('scanSecrets still fires on a file that has not opted out', () => {
+  const found = scanSecrets([{ path: 'new.md', content: 'contact real@acme.co' }]);
+  assert.equal(found.length, 1);
+  const exempt = scanSecrets([{ path: 'new.md', content: '// checks-allow: secrets — fixture\nreal@acme.co' }]);
+  assert.deepEqual(exempt, []);
 });

@@ -10,6 +10,11 @@ This file exists because LLMs make predictable mistakes when writing code. Not r
 
 These are not suggestions. These are rules. Follow them and you'll produce code that doesn't need to be rewritten. Ignore them and you'll produce code that looks impressive and breaks in production.
 
+<!-- CLAUDE-CORE:BEGIN v1 -->
+<!-- Managed by bci/claude-config. Do not edit here — edit core/CLAUDE.core.md there and
+     run `claude-doctor --sync`. `claude-doctor` fails when this block has drifted.
+     Project-specific rules go BELOW the END marker, where they are never overwritten. -->
+
 ## 1. Read Before You Write
 
 The single biggest source of bad LLM code is not reading the existing codebase before writing new code. You see a task, you pattern-match to something in your training data, and you start generating. This is almost always wrong.
@@ -184,6 +189,8 @@ These are the patterns I see most often. If you catch yourself doing any of thes
 **The Style Drift.** You write code in your "preferred" style instead of matching the project. Functional patterns in an OOP codebase. Classes in a functional codebase. TypeScript patterns in a JavaScript project. Match the codebase, not your preferences.
 
 **The Runaway Refactor.** You start fixing one thing. It touches another thing. That touches another. Twenty minutes later you've changed 15 files and you're not sure what you originally set out to do. If a fix is cascading, stop. Tell the user what's happening. Get buy-in before continuing.
+
+<!-- CLAUDE-CORE:END v1 -->
 
 ## 11. This Tool Spends Quota and Edits a Real Account
 

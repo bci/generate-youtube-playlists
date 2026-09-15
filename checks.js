@@ -52,10 +52,17 @@ function has(cmd) {
 
 /** Every tracked file, with its content. Binary and very large files are skipped. */
 export function trackedFiles() {
+  // Tracked, plus untracked-but-not-ignored. The second half matters more than it looks:
+  // git ls-files alone sees a new file only after it is committed, so a secret in a file
+  // added this session would pass every check and be caught by the commit after the one
+  // that leaked it. Found by committing test/checks.test.js and watching eight planted
+  // fixtures appear for the first time.
   const listed = git(['ls-files']);
+  const untracked = git(['ls-files', '--others', '--exclude-standard']);
   if (!listed.ok) return [];
   const out = [];
-  for (const rel of listed.out.split('\n').filter(Boolean)) {
+  const all = [...listed.out.split('\n'), ...(untracked.ok ? untracked.out.split('\n') : [])];
+  for (const rel of all.filter(Boolean)) {
     const full = path.join(ROOT, rel);
     let stat;
     try {
@@ -195,6 +202,19 @@ const NOT_OURS = new Set(['package-lock.json']);
  * `handles` is the local channel list when there is one, so the check catches a real
  * channel name that wandered into a tracked example.
  */
+/**
+ * A file may opt out of one check by saying so, with a reason.
+ *
+ * Needed because a test that plants the fault it claims to catch will always trip the
+ * scanner: test/checks.test.js carries fake client ids and a non-example.com address on
+ * purpose, and the alternative was to weaken the fixtures until they no longer proved
+ * anything. The reason is mandatory — `checks-allow: secrets` on its own does not match —
+ * so an exemption cannot be added silently.
+ */
+export function allowsCheck(content, check) {
+  return new RegExp(`checks-allow:\\s*${check}\\s*[-—:]\\s*\\S`).test(String(content));
+}
+
 export function scanSecrets(files, handles = []) {
   const found = [];
   const patterns = [
@@ -209,6 +229,7 @@ export function scanSecrets(files, handles = []) {
 
   for (const file of files) {
     if (NOT_OURS.has(file.path)) continue;
+    if (allowsCheck(file.content, 'secrets')) continue;
     for (const [re, what] of patterns) {
       const m = re.exec(file.content);
       if (m) found.push(error('secrets', `${file.path} contains what looks like ${what}`));

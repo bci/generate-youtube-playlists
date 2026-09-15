@@ -158,6 +158,31 @@ than regenerating `.env` from parsed pairs. `.env` is the only copy of the OAuth
 token on this machine, and a regenerating helper would quietly drop the comments that say
 what each key is for.
 
+### The secrets check had a hole, found by committing
+
+Adopting the managed core block from `bci/claude-config` was a seven-line insertion with no
+deletions — this repo's §1–10 was already byte-identical to the canonical, which is the
+result that says the extraction was faithful. The interesting part was what happened next.
+
+**`make ci` went red immediately after the commit, and it was right.** Eight `secrets`
+errors, all in `test/checks.test.js` — the fake client ids, playlist ids and non-example.com
+addresses that exist precisely so the scanner can be proven to reject them.
+
+The reason it appeared only *after* committing is the actual defect: `trackedFiles()` used
+`git ls-files`, which does not see a file until it is tracked. So a secret in a file added
+during a session passed every check, and would have been caught by the commit *after* the one
+that leaked it — which for an irreversible push is exactly one commit too late. Now scans
+`git ls-files` plus `--others --exclude-standard`, so a new file is checked before it is
+committed. Verified by dropping an untracked file with an address in it and watching `check`
+fail.
+
+The fixtures themselves needed an exemption, and the shape of it matters. Weakening them to
+`example.com` would have deleted the test. A blanket skip for `test/**` would mean a real
+secret in a test file is never caught. So a file may opt out of one named check by saying so
+**with a reason** — `checks-allow: secrets — planted fixtures…` — and a bare `checks-allow:
+secrets` does not match. An exemption that costs nothing is the silent way past the one check
+guarding a mistake that cannot be undone.
+
 ### Task runner built — FEAT-0011
 
 **The question was which task runner, not whether.** The obvious answer — a `Makefile` for

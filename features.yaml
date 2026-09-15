@@ -382,7 +382,14 @@ features:
       finding, since a regex that silently matches nothing would otherwise report a clean
       bill forever. Only the check table is searched, so a same-named row in the targets
       table cannot stand in for a missing one.
-      24 tests, each planting the fault it claims to catch.
+      2026-09-15: two fixes found by dogfooding. trackedFiles() used `git ls-files`, which
+      does not see a file until it is tracked - so a secret in a file added during a session
+      passed every check and would have been caught by the commit AFTER the one that leaked
+      it. Now scans untracked-but-not-ignored files too. And a file may opt out of one named
+      check with `checks-allow: <check> - <reason>`; the reason is mandatory, because the
+      fixtures in test/checks.test.js must stay real to prove the scanner works, while a
+      blanket test/** skip would mean a genuine secret in a test file is never caught.
+      26 tests, each planting the fault it claims to catch.
 
   - id: FEAT-0014
     title: Configurable schedule - change-run-time
