@@ -254,3 +254,48 @@ Two specific failure modes to avoid:
 
 If a change is too small to be worth a worklog entry, it is small enough that saying so in
 one line costs nothing. Do that rather than skipping silently.
+
+## 14. Two Sessions Share This Tree
+
+Two Claude sessions work on this repo and **they cannot message each other**: `cli` (Claude
+Code, terminal, on glinda) and `app` (Cowork, desktop app). They coordinate through a file
+mailbox at `.agent-pipe/` -- gitignored, so it holds working notes, not history.
+
+**`cli` is the only writer to this working tree.** `app` reads anything and writes only
+inside `.agent-pipe/to-cli/` and `.agent-pipe/archive/`. It does not edit
+source, docs, fixtures or config; does not spend quota; does not commit or push. To change
+something it sends a proposal and `cli` applies it, replying with what it actually did --
+which may not be what was asked.
+
+This is not ceremony, and it is not only about lost edits. `cli` is the side with
+`node_modules` and `.githooks/pre-push`, so it is the side that can actually run the lint and
+test gate, keep the §13 bookkeeping straight, and honour §11 before anything touches the real
+account. A change that enters the tree any other way has passed none of that.
+
+The lost-edit half is real too: two agents editing one tree with no lock loses work silently
+-- A reads a file, B rewrites it, A writes back its stale copy, and B's change is gone with
+no error and nothing in the diff to notice.
+
+**On starting a turn in this repo:**
+
+1. Check `.agent-pipe/to-<your side>/` before touching the tree. A waiting message may
+   claim a path you were about to edit.
+2. Act, then `mv` the message into `.agent-pipe/archive/`. Archive on action, not on
+   read -- it is the only signal the other side gets. Never delete.
+3. Before writing, send a message whose `claims:` names the paths or directories you are
+   about to write, so the other side is not building a proposal against content you are
+   rewriting underneath it.
+4. Messages are `NNN-<from>-<slug>.md`, three digits, one sequence across both directions.
+   Write to a temp file and `mv` it into place, or use `.agent-pipe/pipe.sh send`; a
+   reader polling the directory will otherwise pick up half a message. Never edit a message
+   after it lands -- send a correction with the next number.
+
+Full protocol and the reasoning behind each rule:
+[`.agent-pipe/README.md`](.agent-pipe/README.md).
+
+**The mailbox is not a live channel.** Neither side runs between its own turns, so a message
+may sit unread for hours or forever. Silence is not consent and it is not disagreement. If
+you need an answer before it is safe to proceed, ask Kent -- he is present and reading.
+
+**Nothing secret goes in a message.** Gitignored is not gone; §12 applies here exactly as it
+does to a tracked file.

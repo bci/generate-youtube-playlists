@@ -100,8 +100,9 @@ Deliberately phased, because quota runs out mid-run and the report still has to 
 
 ## Guardrails
 
-The hard rules live in [CLAUDE.md](CLAUDE.md) §11 (quota and real-account writes) and §12
-(this repo is public). In short:
+The hard rules live in [CLAUDE.md](CLAUDE.md) §11 (quota and real-account writes), §12
+(this repo is public) and §14 (two sessions share this tree -- `cli` writes, `app`
+proposes). In short:
 
 - Test against the live account with `--dry-run`, then `--max=1`. Never a full sync.
 - A write costs 50 units; there are ~200 a day. Never retry a permanent failure.

@@ -28,3 +28,9 @@ state/
 # because they name hosts, schedules and which machine is currently live — operational
 # detail about a deployment, not source.
 docs/turnover/
+
+# Mailbox between two Claude sessions sharing this tree (see .agent-pipe/README.md).
+# Working notes, not history: whichever session is not holding the pen leaves proposals here
+# instead of editing the tree. Ignored is not the same as gone -- these are plaintext files
+# in the working directory, so nothing secret goes in one.
+.agent-pipe/
