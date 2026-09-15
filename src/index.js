@@ -14,12 +14,15 @@ import {
   listMyPlaylists,
   createPlaylist,
   renamePlaylist,
+  deletePlaylist,
 } from './youtube.js';
 import {
   machineKey,
   markerTitle,
   classifyMarker,
   checkClaimSync,
+  checkUnclaimSync,
+  planUnclaim,
   conflictMessage,
 } from './marker.js';
 import { loadLedger, saveLedger } from './seen.js';
@@ -87,6 +90,8 @@ export function parseArgs(argv) {
     maxRemovals: Infinity,
     watchedPlaylist: 'Watched',
     claimSync: false,
+    unclaimSync: false,
+    unclaimAll: false,
     after: null,
     older: null,
     shorts: null,
@@ -103,6 +108,8 @@ export function parseArgs(argv) {
     else if (arg === '--report-watched') opts.reportWatched = true;
     else if (arg === '--unlike') opts.unlike = true;
     else if (arg === '--claim-sync') opts.claimSync = true;
+    else if (arg === '--unclaim-sync') opts.unclaimSync = true;
+    else if (arg === '--unclaim-all') opts.unclaimAll = true;
     else if (arg.startsWith('--max-removals='))
       opts.maxRemovals = parseLimit(arg.slice(15), arg);
     else if (arg.startsWith('--watched-playlist='))
@@ -460,16 +467,88 @@ export async function checkSyncMarker(youtube, opts) {
   return null;
 }
 
+/**
+ * Release this account's sync marker, then stop. Standalone rather than a modifier on a
+ * sync run: giving the account up and then immediately syncing it is a contradiction, and
+ * the run that follows would be the one to re-create the marker.
+ *
+ * Costs one listing (1 unit) plus 50 per marker deleted. Returns the process exit code.
+ */
+export async function runUnclaim(youtube, opts) {
+  const key = machineKey(os.hostname());
+  let playlists;
+  try {
+    playlists = await listMyPlaylists(youtube);
+  } catch (err) {
+    console.error(`\n❌ Could not read this account's playlists: ${cleanErr(err)}`);
+    return 1;
+  }
+
+  const plan = planUnclaim(playlists, key, { all: opts.unclaimAll });
+  if (plan.action === 'none') {
+    console.log(`\nNothing to unclaim: ${plan.reason}.`);
+    return 0;
+  }
+
+  const names = plan.targets.map((p) => `"${p.title}"`).join(', ');
+  if (opts.dryRun) {
+    console.log(`\n(--dry-run) Would delete ${plan.targets.length} marker(s): ${names}.`);
+    console.log(`   That would cost ${plan.targets.length * 50} quota units.`);
+    return 0;
+  }
+
+  let deleted = 0;
+  for (const marker of plan.targets) {
+    try {
+      await deletePlaylist(youtube, marker.id);
+      deleted += 1;
+      console.log(`\nReleased "${marker.title}".`);
+    } catch (err) {
+      // Keep going: with --unclaim-all a marker we cannot delete should not strand the
+      // ones we can, and the count below reports honestly either way.
+      console.error(`\n❌ Could not delete "${marker.title}": ${cleanErr(err)}`);
+    }
+  }
+
+  if (!deleted) return 1;
+  console.log(`\n${deleted} marker(s) deleted, ${deleted * 50} quota units spent.`);
+  if (plan.remaining.length) {
+    console.log(
+      `\n${plan.remaining.length} marker(s) from other machines remain, so this account is ` +
+        'still claimed. Use --unclaim-all to clear those too.'
+    );
+  } else {
+    console.log(
+      '\nThis account is now unclaimed: the next machine to run a sync takes it, and any ' +
+        'second machine will then report a conflict as before.'
+    );
+  }
+  // Saying this here rather than in the runner: whoever reaches for the flag directly
+  // needs it as much as whoever types `make unclaim`.
+  console.log('Disable this machine\u2019s scheduled jobs too, or tonight\u2019s run claims it straight back.');
+  return 0;
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
 
   // Before anything reaches the network: --claim-sync from a scheduled job is an
   // operator error, never an intention, so it stops here rather than being ignored
   // nightly for a year. A malformed channel setting is treated the same way.
-  const claimRefusal = checkClaimSync(opts, Boolean(process.stdin.isTTY));
+  const claimRefusal =
+    checkClaimSync(opts, Boolean(process.stdin.isTTY)) ||
+    checkUnclaimSync(opts, Boolean(process.stdin.isTTY));
   if (claimRefusal) {
     console.error(`\n❌ ${claimRefusal}`);
     process.exit(1);
+  }
+
+  // Unclaiming is a standalone operation and ends the process: it needs no channel list
+  // and no config, so it runs before either is read. A machine giving the account up is
+  // often one that can no longer read its own config anyway.
+  if (opts.unclaimSync || opts.unclaimAll) {
+    const auth = await getAuthorizedClient();
+    process.exit(await runUnclaim(makeYouTube(auth), opts));
   }
 
   // A channel named on the command line has no config line, so --after= is the only

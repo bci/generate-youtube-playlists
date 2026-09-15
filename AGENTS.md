@@ -39,9 +39,50 @@ src/authorize.js  `npm run authorize` entry point
 src/heartbeat.js  Writes/reads state/last-run.json; the pure staleness rule
 src/watchdog.js   `npm run watchdog` entry point — alerts when the sync goes quiet
 test/*.test.js    node:test, no framework, mocked YouTube clients
+
+make.js           Task runner: every maintenance action, and their only implementation
+checks.js         The pre-push checks behind `make check` / `make ci` (pure rules)
+Makefile          Shim → make.js, so `make <target>` works (macOS)
+build.ps1         Shim → make.js, so `.\build.ps1 <target>` works (Windows)
 ```
 
 ## Commands
+
+Everything has a target. `make` (macOS) and `.\build.ps1` (Windows) are shims over
+`make.js`; run either with no target for the list.
+
+```powershell
+make doctor                       # can this checkout run at all: node, creds, config
+make dry-run                      # read everything, write nothing
+make dry-run "@Handle"            # the same, one channel
+make run "@Handle" max=1          # sync for real, at most one insert
+make add-channel "@Handle" shorts=split
+make ci                           # lint + tests + every check, reporting all failures
+make install                      # register the 3 AM job and the watchdog
+make status                       # is it installed, and when did a sync last finish
+make change-run-time 0430         # move the sync; the watchdog follows six hours later
+make unclaim-all                  # clear every sync claim on the account
+```
+
+Neither shim needs editing to add a target — but both carry a **generated** list of them
+between `>>> targets >>>` markers, so `grep uninstall Makefile` works. `make sync-shims`
+rewrites it and `make check` fails when it has drifted.
+
+**Both shims take the same arguments, in the same order** — that is deliberate, so a
+command learned on one machine works on the other:
+
+- `"@Handle"` — always quoted. `@` begins a splatting expression in PowerShell, and a bare
+  handle there expands to nothing at all.
+- `key=value` for settings *and* flags: `max=1`, `shorts=split`. Never `--max=1`; make
+  claims raw `--flags` for itself and swallows `--dry-run` and `--max` silently.
+- **Times are four-digit 24-hour** (`0430`, not `04:30`). A colon is a rule separator to
+  make, which dies while parsing the Makefile — before `make.js` runs, so no useful error
+  is possible — and quoting does not help, because the shell strips it first.
+
+`make check` fails if a new target's documented arguments contain either character. See the
+header comments in `Makefile` and `make.js`.
+
+The underlying npm scripts still work, and are what the scheduled wrappers call:
 
 ```powershell
 npm install
@@ -152,9 +193,10 @@ schema. The rules that matter when editing it:
 - Bump the top-level `updated:` whenever the file changes.
 - `notes:` is where the caveats and known limits go — a feature marked `complete` with a
   real limitation is honest; one marked `complete` that quietly isn't, is not.
-- **It must stay valid YAML.** Verify after editing, e.g.
-  `python -c "import yaml,sys; yaml.safe_load(open('features.yaml',encoding='utf-8'))"`.
-  Nothing enforces this automatically — there is no CI for it in this repo.
+- **It must stay valid YAML**, and `make check` now enforces that — along with the rules
+  above: unique ascending zero-padded ids, a valid `status`, real dates, known components,
+  and a `release:` that names an actual VERSIONS.md heading. It runs as part of
+  `make ci`, which the pre-push hook calls.
 
 When a feature lands, the change that lands it also moves its entry to `complete` and sets
 `release` and `updated`. A feature is not done while its entry still says `planned`.

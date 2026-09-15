@@ -13,3 +13,9 @@
 # The plists are XML and tolerate CRLF, but they are macOS-only files and travel with the
 # scripts; keeping the pair consistent means one rule to remember instead of two.
 *.plist text eol=lf
+
+# Makefile is a third file with the same failure: make passes each recipe line to the
+# shell verbatim, so a CRLF checkout runs `node make.js version\r` and the shell reports
+# a command it cannot find - naming the target rather than the line endings. build.ps1 is
+# not listed because PowerShell reads either ending.
+Makefile text eol=lf

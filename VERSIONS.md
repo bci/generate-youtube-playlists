@@ -4,7 +4,84 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
-## Unreleased — macOS scheduling (FEAT-0009) and the sync marker (FEAT-0010)
+## Unreleased — macOS scheduling (FEAT-0009), the sync marker (FEAT-0010), the task runner (FEAT-0011), releasing a claim (FEAT-0012), pre-push checks (FEAT-0013) and a configurable schedule (FEAT-0014)
+
+**Releasing a claim.** `--unclaim-sync` deletes this machine's sync marker; `--unclaim-all`
+deletes every marker, leaving the account for whichever machine syncs first. This completes
+the pair FEAT-0010 left open — claiming existed, releasing meant deleting a playlist by hand
+in the YouTube UI — and it resolves the one case `checkSyncMarker()` explicitly cannot: with
+two markers present it refuses to claim, because renaming onto an existing title would leave
+two playlists with the same name.
+
+Terminal-only, with its own check rather than sharing `--claim-sync`'s, because the reason is
+worse: an unattended claim flaps at 50 units a write, but an unattended *unclaim* costs 100 a
+night forever — the next run finds no marker and creates one, release, recreate, release — and
+each half of that loop looks entirely correct in the log. `make unclaim` additionally refuses
+while the nightly job is still installed here, since tonight's run would claim the account
+straight back; the order that works is uninstall, then unclaim.
+
+**Pre-push checks.** `make check` finds what lint and the tests cannot, and `make ci` now runs
+lint, the tests **and** every check, reporting all failures at once instead of stopping at the
+first. Two guardrails this repo states but nothing enforced now have teeth: the public-repo
+rule (CLAUDE.md §12) is checked on every tracked file at error level, and `features.yaml` —
+of which AGENTS.md said "nothing enforces this automatically, there is no CI for it in this
+repo" — is parsed and checked against its own documented rules. That sentence is now false.
+
+Errors fail the build; warnings print and do not. A warning that blocks a push is an error
+wearing a disguise, and the honest fix is to promote it rather than to teach people
+`--no-verify`. Adds `yaml` (2.9.1, no transitive dependencies) — the first new devDependency
+since eslint, because the alternatives were a parser for a restricted subset that would accept
+files real YAML rejects, or python3+pyyaml, which degrades to "skipped" on the Windows host
+that actually pushes.
+
+**A configurable schedule.** `make change-run-time 0430` moves the nightly sync, stores it as
+`SYNC_AT` in `.env`, moves the watchdog to six hours later, and reinstalls both jobs so the
+scheduler picks it up. The watchdog follows rather than staying put because the gap is its
+whole purpose: on the sync's own schedule it is silent in exactly the case it exists to catch.
+
+**Both shims now take the same arguments in the same order**, so a command learned on one
+machine works unchanged on the other. That is what forced four-digit `0430` over `04:30`: a
+colon is a rule separator to make, which dies with `multiple target patterns` while still
+*parsing* the Makefile — before `make.js` runs, so no useful message is possible — and
+quoting does not help, because the shell strips it first. An `at=04:30` form under make only
+was tried and dropped; a shim-specific spelling is precisely the inconsistency being removed.
+`make check` now fails if any target's documented arguments contain a colon or a raw
+`--flag`, so neither trap can come back through a new target.
+
+**The shims now list their targets.** A fully generic shim names no target, so opening the
+Makefile to find out whether `uninstall` exists showed nothing — reported four times, for four
+targets that already existed. Both shims now carry a generated list between markers,
+`make sync-shims` writes it, and `make check` fails when it drifts, so it cannot become the
+stale hand-kept menu the generic design was avoiding. `make change-email` was added alongside.
+
+
+**One target per action, on both platforms.** `make <target>` on macOS and
+`.\build.ps1 <target>` on Windows now cover setup, `doctor`, `dry-run`, `run`,
+`add-channel`, `install`, `status`, `ci` and the rest; either shim with no target prints
+the list. Both are ~40-line shims over `make.js`, which holds the only implementation.
+
+Two implementations were the obvious shape and are what this rejects: writing every target
+twice, in two shell dialects, tests only one of them per machine — and `add-channel`
+would have grown a second `channels.txt` parser in `sed` and a third in PowerShell beside
+the real one in `src/index.js`. It reuses that parser instead, so a line is validated by
+the same code that reads it at 3 AM. Node decided the language: `package.json` already
+pins 20.12+, so it is the only interpreter guaranteed on both platforms, while `make` is
+absent on Windows and PowerShell on macOS.
+
+Four silent failure modes were found and guarded, all of them the "looks like it worked"
+kind. `make test` finds the `test/` **directory**, calls it up to date and runs nothing
+(fixed with `.PHONY`). `make run --dry-run` is taken as make's own `-n`, so the recipe is
+echoed and nothing executes — reading exactly like a dry run that worked. `make run
+--max=1` is matched as an abbreviation of make's `--max-load` and becomes `-l 1`, quietly
+removing the cap on writes against a live account. And in PowerShell an unquoted
+`@Handle` is a splatting expression that expands to `$null`, which PowerShell then
+**drops** when building a native command's argv — so `run @One` and `run` are identical by
+the time Node sees them, and the second syncs every channel. The first three are caught by
+`make.js`, the last by `build.ps1`, each naming the fix.
+
+Not yet run on Windows: the scheduling half uses the `Register-ScheduledTask` form the
+README already documents, but only the shim's argument handling has been verified there
+(against pwsh 7.6 on macOS). 16 new tests, 164 total.
 
 **Sync marker.** Each run leaves a private, empty playlist named `gyp-sync-<hostname>` on the
 account, recording which machine owns the nightly sync. No marker → create one (50 units,

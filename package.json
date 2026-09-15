@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "test": "node --test",
     "lint": "eslint . --max-warnings=0",
+    "make": "node make.js",
     "watchdog": "node src/watchdog.js"
   },
   "license": "MIT",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.7.0",
-    "globals": "^17.7.0"
+    "globals": "^17.7.0",
+    "yaml": "^2.9.1"
   }
 }

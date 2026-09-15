@@ -176,6 +176,18 @@ export async function renamePlaylist(youtube, playlistId, title, description) {
   return { id: res.data.id, title: res.data.snippet.title };
 }
 
+/**
+ * Delete a playlist (50 units). Used only to release a sync marker.
+ *
+ * Deliberately not reachable from any sync path: this deletes a playlist and everything
+ * in it, and the only playlist this tool is ever willing to destroy is its own marker,
+ * which is empty by design. Nothing here checks that - the caller does, from the
+ * classification in marker.js, and that is where it must stay.
+ */
+export async function deletePlaylist(youtube, playlistId) {
+  await youtube.playlists.delete({ id: playlistId });
+}
+
 export async function createPlaylist(youtube, title, description) {
   const res = await youtube.playlists.insert({
     part: ['snippet', 'status'],

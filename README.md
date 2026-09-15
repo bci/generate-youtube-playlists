@@ -13,6 +13,7 @@ it builds an HTML report table and can email it to the address you configure.
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [One-time setup](#one-time-setup)
+- [Targets — `make` and `build.ps1`](#targets--make-and-buildps1)
 - [Usage](#usage) — [flags](#flags), [per-channel settings](#per-channel-settings)
 - [Scheduling](#scheduling) — [Windows](#windows), [macOS](#macos), and [the watchdog](#the-watchdog)
 - [Email](#email)
@@ -90,6 +91,101 @@ is written to `.env` (`GOOGLE_REFRESH_TOKEN`) so future runs need no browser.
 > expire on a timer, and no Google verification is required while you are its only user.
 
 ---
+
+## Targets — `make` and `build.ps1`
+
+Every maintenance action has a target. Run either shim with no target for the list:
+
+```powershell
+make                 # macOS
+.\build.ps1          # Windows
+npm run make         # anywhere, if you would rather not use either shim
+```
+
+| | |
+| --- | --- |
+| `setup` | install dependencies, enable the pre-push hook, create `.env` and `config/channels.txt` |
+| `authorize` | the one-time browser OAuth |
+| `change-email` | set `REPORT_TO` in `.env` — who receives the run report |
+| `doctor` | can this checkout run at all: node version, credentials, channel list, hooks |
+| `dry-run` | read everything, write nothing |
+| `run` | sync for real — every channel, or just the one named |
+| `nightly` | exactly what the scheduled job runs (`--email-on-change`), by hand |
+| `watchdog`, `watchdog-dry` | the staleness check, with and without sending |
+| `list-channels` | the configured channels and the playlists each one asks for |
+| `add-channel`, `remove-channel` | edit `config/channels.txt`, validated |
+| `claim` | take the [sync marker](#the-sync-marker) over from another machine (50 quota units) |
+| `unclaim`, `unclaim-all` | give this machine's claim up, or clear every claim on the account (50 units per marker) |
+| `test`, `lint` | the suite, and eslint |
+| `check` | everything lint and the tests cannot see — see [below](#what-check-looks-for) |
+| `ci` | lint, tests **and** `check` — what the pre-push hook runs |
+| `sync-shims` | regenerate the target list inside `Makefile` and `build.ps1` |
+| `install`, `uninstall` | register or remove the nightly job and the watchdog |
+| `status` | is the job installed, and when did a sync last finish |
+| `change-run-time` | move the nightly sync (`change-run-time 0430`); the watchdog follows six hours later |
+| `run-now` | trigger the scheduled sync through the scheduler itself |
+| `report`, `logs`, `clean`, `version` | open the last report, tail the log, delete `logs/` and `report.html` — **never `state/`**, which holds the watched ledger — identify this checkout |
+| `help` | the generated list — the same one `Makefile` and `build.ps1` carry as a comment |
+
+**Why two shims and one implementation.** Windows does not ship `make` and macOS does not
+ship PowerShell, so neither is a cross-platform task runner on its own. Node is — this
+project already requires 20.12+ — so every target is implemented once in
+[`make.js`](make.js), where it is linted and tested with the rest of the project and can
+reuse the project's own code (`add-channel` validates a line with the same parser that
+reads it at 3 AM). `Makefile` and `build.ps1` are ~40 lines each and never change when a
+target is added.
+
+### Passing arguments
+
+```powershell
+make dry-run "@SomeChannel"              # a channel
+make run "@SomeChannel" max=1            # a channel and a flag
+make add-channel "@SomeChannel" shorts=split after=2026-01-01
+make logs 100
+```
+
+**Both shims take the same arguments, in the same order.** That is deliberate: a command
+you learn on the Mac works unchanged on the Windows box. Three rules, and each exists
+because the alternative fails *silently*:
+
+| Write | Not | Because |
+| --- | --- | --- |
+| `"@SomeChannel"` | `@SomeChannel` | `@` begins a splatting expression in PowerShell, so a bare handle expands to **nothing** — turning `run "@One"` into a sync of every channel in the list. `build.ps1` refuses an empty argument rather than passing it on. |
+| `max=1` | `--max=1` | make matches `--max` as an abbreviation of its own `--max-load` and silently becomes `-l 1`, so the cap on writes against a live account disappears. |
+| `0430` | `04:30` | a colon is a rule separator to make, which dies with `multiple target patterns` while still *parsing* the Makefile — before `make.js` runs, so no useful message is possible. Quoting does not help: the shell strips it before make ever looks. |
+
+`--dry-run` is the fourth of these and has no `key=value` spelling, so it has its own
+target: use `make dry-run`, never `make run --dry-run`, which make takes as its own `-n`
+and answers by printing the recipe and running nothing — reading exactly like a dry run
+that worked.
+
+Where a raw flag is unavoidable, `make` alone offers an escape hatch:
+`make run ARGS='--report-watched'`. Everything caught here is caught loudly — the recipe
+is marked `+` so it still executes under `-n`, `make.js` refuses and names the flag, and
+`make check` fails if a new target's documented arguments contain a colon or a `--`.
+
+### What `check` looks for
+
+`make ci` runs lint, the test suite **and** `make check`, and it does not stop at the
+first failure — it runs everything and lists every finding at once, because a gate that
+makes you fix one thing and run again is a gate people learn to skip with `--no-verify`.
+**Errors fail the build; warnings are printed and counted but do not.** A warning that
+blocks a push is an error wearing a disguise, and the honest fix is to promote it.
+
+| Check | Level | What it catches |
+| --- | --- | --- |
+| `secrets` | error | An address that is not `example.com`, a Google client id/secret/refresh token, a playlist or channel id, a tenant GUID — and any file that must be git-ignored being tracked, `.agent-pipe/` included. [This repo is public](#); a push is not reversible. |
+| `manifest` | error | `features.yaml` that no longer parses, plus the rules `AGENTS.md` states: unique ascending `FEAT-NNNN` ids, a valid `status`, real dates, known components, and a `release:` that names an actual VERSIONS.md heading. |
+| `endings` | error | CRLF in a `.sh`, `.plist` or `Makefile` — the failure that shows up as `/bin/sh^M: bad interpreter` at 3 AM. |
+| `shims` | error | The target list inside `Makefile`/`build.ps1` having drifted from the registry. Fix with `make sync-shims`. |
+| `targets` | error | A target whose documented arguments contain a `:` or a raw `--flag` — neither survives a make command line, and both were found the hard way. |
+| `engines` | error | Node older than the `package.json` floor. |
+| `plists` | error | `plutil -lint` on the LaunchDaemon templates (macOS only; a warning elsewhere). |
+| `links` | warn | Markdown links to repo paths that do not exist, resolved relative to the linking file. Git-ignored targets are skipped — `.agent-pipe/` is created on demand by the agent-pipe skill and is never committed. |
+| `bookkeeping` | warn | Code changed against the upstream branch while `WORKLOG.md`, `VERSIONS.md` and `features.yaml` did not. |
+| `docs` | warn | A target that exists but is not mentioned in this README, or a check that emits findings with no row in *this* table. Both are drift in the same direction: documentation that quietly covers most of the thing. |
+| `audit` | warn | `npm audit` findings. Skipped, not failed, when offline. |
+| `shell` | warn | `shellcheck -s sh` on the wrappers, when it is installed. |
 
 ## Usage
 
@@ -656,6 +752,9 @@ git config core.hooksPath .githooks
 | `run-sync.sh`           | macOS LaunchDaemon wrapper for the nightly sync   |
 | `run-watchdog.sh`       | macOS LaunchDaemon wrapper for the watchdog       |
 | `launchd/*.plist`       | macOS LaunchDaemon templates (repo path + user are placeholders) |
+| `make.js`               | Task runner — every target, and their only implementation |
+| `Makefile`              | Shim → `make.js`, so `make <target>` works (macOS)  |
+| `build.ps1`             | Shim → `make.js`, so `.\build.ps1 <target>` works (Windows) |
 | `config/channels.example.txt` | Tracked template for the channel list       |
 | `config/channels.txt`   | Your recurring channel list — git-ignored         |
 | `.env`                  | All secrets (Google OAuth + Microsoft Graph) — git-ignored |

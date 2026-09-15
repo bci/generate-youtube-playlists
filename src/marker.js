@@ -93,6 +93,65 @@ export function checkClaimSync({ claimSync }, isTty) {
   );
 }
 
+/**
+ * Why `--unclaim-sync` and `--unclaim-all` are refused without a terminal.
+ *
+ * Separate from checkClaimSync because the reason is worse, not merely similar. An
+ * unattended claim flaps at 50 units a write; an unattended *unclaim* costs 100 a night
+ * forever, because the very next run finds no marker and creates one again — release,
+ * recreate, release — and each half of that loop looks entirely correct in the log.
+ */
+export function checkUnclaimSync({ unclaimSync, unclaimAll }, isTty) {
+  if ((!unclaimSync && !unclaimAll) || isTty) return null;
+  const flag = unclaimAll ? '--unclaim-all' : '--unclaim-sync';
+  return (
+    `${flag} needs a terminal: it gives this account up, and the next scheduled run ` +
+    'would simply claim it again — 100 quota units a night, indefinitely. Run it from a ' +
+    'terminal, or drop the flag.'
+  );
+}
+
+/**
+ * What an unclaim should delete, given the account's playlists. Pure: it takes the titles
+ * the API already returned and returns a decision, so the rule is testable without a
+ * client, a network or a key.
+ *
+ * Two modes, and the difference is whose claim is being given up:
+ *
+ *   default   — only *our own* marker. A foreign one is not ours to delete; `--claim-sync`
+ *               is the direction that touches those, and a machine that never claimed this
+ *               account has nothing to give up. This also resolves the one case
+ *               checkSyncMarker() cannot: with two markers present it refuses to claim,
+ *               because renaming onto an existing title would leave two playlists called
+ *               the same thing, and tells the reader to delete one by hand. Deleting ours
+ *               is that same fix without the YouTube UI.
+ *   all       — every marker on the account, ours and theirs, at 50 units each. The reset:
+ *               it leaves the account unclaimed so the next machine to run takes it. Safe
+ *               *because* the guard re-arms itself — the first run creates its own marker
+ *               and any second machine then reports a foreign one, exactly as before.
+ *               Retiring hosts is what it is for; it is not a way to silence a conflict,
+ *               which would come straight back.
+ */
+export function planUnclaim(playlists, ourKey, { all = false } = {}) {
+  const found = classifyMarker(playlists, ourKey);
+  const ours = found.ours ? [found.ours] : [];
+  const targets = all ? [...ours, ...found.foreign] : ours;
+
+  if (!targets.length) {
+    const theirs = found.foreign.map((p) => `"${markerKeyOf(p.title)}"`).join(', ');
+    return {
+      action: 'none',
+      reason: found.foreign.length
+        ? `this machine holds no claim here. The marker(s) present belong to ${theirs}; ` +
+          'use --unclaim-all to clear those too, or --claim-sync to take the account over'
+        : 'this account has no sync marker, so there is nothing to give up',
+    };
+  }
+  // `remaining` is what a default unclaim deliberately leaves behind, so the caller can
+  // say so rather than implying the account is now free.
+  return { action: 'delete', targets, remaining: all ? [] : found.foreign };
+}
+
 /** One line naming the machines that hold a foreign claim. */
 export function conflictMessage(classification) {
   const keys = classification.foreign.map((p) => markerKeyOf(p.title));

@@ -43,6 +43,9 @@ components:
   - id: qa
     name: Tests
     path: test
+  - id: tooling
+    name: Task runner and shims
+    path: make.js
 
 features:
   - id: FEAT-0001
@@ -244,3 +247,180 @@ features:
       README documents works. The create-on-first-run branch is covered by a mocked client
       rather than live, since exercising it for real would cost 100 units to test three
       lines.
+
+  - id: FEAT-0011
+    title: Cross-platform task runner - make, build.ps1 and make.js
+    description: >
+      One target per maintenance action - setup, doctor, dry-run, run, add-channel,
+      install, status, ci and the rest - implemented once in make.js and reached through
+      `make <target>` on macOS or `.\build.ps1 <target>` on Windows. Running either shim
+      with no target prints the generated list.
+    components: [tooling, ops, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      Built 2026-09-15. The alternative considered and rejected was a Makefile and a
+      build.ps1 each carrying its own implementation: that writes every target twice, in
+      two languages, and only ever tests one of them per machine - and add-channel would
+      have meant a second channels.txt parser in sed and a third in PowerShell, beside the
+      real one in src/index.js. Node decided it: package.json already pins >= 20.12, so it
+      is the only interpreter guaranteed on both platforms, while make is absent on Windows
+      and PowerShell on macOS. The shims are ~40 lines each and do not change when a target
+      is added; help is rendered from the registry, so the menu cannot go stale.
+      2026-09-15: added change-email (sets REPORT_TO in .env, rewriting one line and
+      leaving the comments that say what each key is for), and a generated target list
+      inside both shims. The list exists because a fully generic shim names no target, so
+      opening the Makefile to check whether `uninstall` exists shows nothing - reported
+      four separate times for four targets that were already there. `sync-shims` writes
+      it and the `shims` check (FEAT-0013) fails when it drifts, so it cannot become the
+      stale hand-kept menu this design set out to avoid.
+      Three make-specific hazards were found by testing against the GNU Make 3.81 that
+      macOS ships, and all three fail silently. (1) `make test` finds the test/ directory,
+      decides it is up to date and does nothing - fixed with .PHONY over MAKECMDGOALS.
+      (2) `make run --dry-run` is taken as make's own -n, so the recipe is echoed and
+      nothing runs, which reads as a dry run that worked. (3) `make run --max=1` is matched
+      as an abbreviation of make's --max-load and becomes `-l 1`, silently removing the cap
+      on writes against a live account. (2) and (3) are caught by marking the recipe `+`
+      so it still executes under -n and having make.js refuse when MAKEFLAGS carries the
+      letter make kept; key=value (max=1) is the supported spelling, ARGS='...' the escape
+      hatch. A fourth, on the PowerShell side: an unquoted @Handle is a splatting
+      expression that expands to $null, and PowerShell drops nulls when building a native
+      command's argv - so `run @One` and `run` are indistinguishable by the time node sees
+      them, and the second syncs every channel. Guarded in build.ps1, where $args still
+      holds it; -contains rather than a Where-Object pipeline, because the pipeline emits
+      the $null it matched and `if ($null)` is false.
+      Known limits: the Windows half (Register-ScheduledTask, Get-ScheduledTaskInfo,
+      Start-ScheduledTask) is written to the form the README already documents but has not
+      been run on Windows - only the shim's argument handling was verified, against pwsh
+      7.6 on macOS. `setup`, `install`, `uninstall`, `run-now`, `authorize` and `claim`
+      are likewise unexercised here: they install system jobs, need a browser, or spend
+      quota. 16 new tests, 164 total, lint clean.
+
+  - id: FEAT-0012
+    title: Release a sync claim - unclaim and unclaim-all
+    description: >
+      `--unclaim-sync` deletes this machine's sync marker, giving the account up so another
+      machine can take it; `--unclaim-all` deletes every marker, leaving the account
+      unclaimed for whichever machine syncs first. Both are terminal-only and cost 50 quota
+      units per marker.
+    components: [core, tooling, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      Completes the pair FEAT-0010 left open: claiming existed, releasing did not, and the
+      README's answer was to delete the marker playlist by hand in the YouTube UI. It also
+      resolves the one case checkSyncMarker() explicitly cannot - with two markers present
+      it refuses to claim, because renaming onto an existing title would leave two playlists
+      with the same name, and tells the reader to go to the UI. Deleting ours is that same
+      fix from the command line.
+      Terminal-only for a worse reason than --claim-sync's, so it has its own check rather
+      than sharing one: an unattended claim flaps at 50 units a write, but an unattended
+      unclaim costs 100 a night forever, because the next run finds no marker and creates
+      one - release, recreate, release - and each half of that loop looks correct in the
+      log. `make unclaim` additionally refuses while the nightly job is still installed on
+      this machine, since tonight's run would claim the account straight back; the
+      documented order is uninstall, then unclaim. npm start -- --unclaim-sync overrides.
+      planUnclaim() is pure - it takes the titles the API already returned and returns a
+      decision - so every branch is tested without a client, including that only markers
+      are ever deleted and that one failed delete does not strand the others under
+      --unclaim-all. 12 tests, none of which spends quota.
+
+  - id: FEAT-0013
+    title: Pre-push checks - make check and a reporting ci
+    description: >
+      `make check` runs twelve checks for what lint and the test suite cannot see. Among them:
+      secrets or ids in tracked files, a features.yaml that no longer parses or breaks its own
+      rules, CRLF in a file pinned to LF, broken documentation links, a shim target list that
+      has drifted, a target whose documented arguments would not survive a make command line,
+      a node version below the declared floor, missing bookkeeping, and npm audit findings.
+      The README's check table is the full list, and the docs check keeps it that way. `make ci` runs lint, the tests and every check, and
+      reports all failures at once rather than stopping at the first.
+    components: [tooling, qa, ops]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      Two guardrails this repo states but nothing enforced now have teeth. CLAUDE.md section
+      12 (no addresses, ids or channel names in tracked files) is checked on every tracked
+      file, at error level, because a push is not reversible and a secret that reaches GitHub
+      has to be rotated whether or not the commit is later removed. AGENTS.md said outright
+      of features.yaml that "nothing enforces this automatically - there is no CI for it in
+      this repo"; that sentence is now false, and the check covers the documented rules
+      (unique ascending zero-padded ids, valid status, real dates, known components, a
+      release: that names an actual VERSIONS.md heading) as well as YAML validity.
+      Error versus warning is a deliberate line: errors fail, warnings print and do not,
+      because a warning that blocks a push is an error wearing a disguise and the honest fix
+      is to promote it rather than to teach people --no-verify. For the same reason ci runs
+      everything before reporting - "fix one, run again, find the next" is how a gate gets
+      skipped. The bookkeeping check is a warning on purpose: it must not block a genuine
+      one-line typo fix.
+      Adds `yaml` (2.9.1, zero transitive dependencies) as the first new devDependency since
+      eslint. The alternatives were a hand-written parser for a restricted subset, which
+      would accept files real YAML rejects, or shelling out to python3+pyyaml, which
+      degrades to "skipped" on the Windows host - the machine that actually pushes.
+      Two bugs in the checker itself were caught by running it: links were resolved from the
+      repo root rather than from the linking file, which reported all 13 cross-references
+      between the docs/prompts/ files as broken, and probing for a tool with shell:true plus
+      an args array printed a DEP0190 deprecation on every run. Both fixed before it shipped.
+      2026-09-15: the link check skips git-ignored targets. Its one standing warning pointed
+      at .agent-pipe/README.md, the agent-pipe skill's mailbox, which CLAUDE.md describes as
+      gitignored but which was not in .gitignore at all - fixed there, and added to the
+      must-be-ignored list so `git add -f` on it is an error. An ignored path is not part of
+      the repo, so its absence is expected rather than rot, and one permanent known-false
+      warning teaches people to skim the whole report.
+      2026-09-15: the docs check now also verifies that every check name checks.js emits has a
+      row in the README's check table, decided by Kent after the gap was found by hand -
+      `targets` shipped emitting findings with no row, so the table documented 11 of 12
+      checks. The names are scanned out of the source rather than kept in a list beside it,
+      because a list is one more thing to forget to update, which is the defect and not the
+      fix; scanning's own failure mode is covered by treating "no names found at all" as a
+      finding, since a regex that silently matches nothing would otherwise report a clean
+      bill forever. Only the check table is searched, so a same-named row in the targets
+      table cannot stand in for a missing one.
+      24 tests, each planting the fault it claims to catch.
+
+  - id: FEAT-0014
+    title: Configurable schedule - change-run-time
+    description: >
+      `make change-run-time 0430` moves the nightly sync. The time is stored as SYNC_AT
+      in .env, the watchdog follows six hours later as WATCHDOG_AT, and both scheduled jobs
+      are reinstalled so the scheduler picks the change up.
+    components: [tooling, ops, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      The watchdog moves with the sync rather than staying at 09:00, because the six-hour gap
+      is the watchdog's whole purpose - on the sync's own schedule it is silent in exactly
+      the case it exists to catch, and the gap also lets a slow or retrying sync finish
+      before its heartbeat is judged. Moving the sync to 09:00 without that rule would have
+      collided the two silently.
+      The time reaches the plist by substitution into the rendered XML rather than by adding
+      __SYNC_HOUR__ placeholders to the templates, because the README documents installing
+      them by hand with sed on the two placeholders that exist; a third would leave that
+      documented path producing a plist with a literal __SYNC_HOUR__ in it, which launchd
+      rejects while complaining about the file rather than the value.
+      The time is written as four-digit HHMM (0430), not HH:MM, and that is a consistency
+      decision rather than a style one: both shims now take the same arguments in the same
+      order, so a command learned on one machine works on the other. HH:MM cannot do that.
+      A colon is a rule separator to make, so `make change-run-time 04:30` dies with
+      "multiple target patterns" while the Makefile is still being parsed - before make.js
+      runs, which is why no useful message can come from the code - and quoting does not
+      rescue it, because the shell strips the quotes before make sees the word (verified for
+      "04:30", '04:30' and 04\:30). An earlier build worked around this with an `at=04:30`
+      form under make only; that was dropped, because a shim-specific spelling is the
+      inconsistency this decision exists to remove. Zero-padded HH:MM is still parsed, simply
+      not taught; 4:30 and 430 are rejected, so the tolerance is narrower than "HH:MM" implies.
+      checkTargetArgs() (FEAT-0013) now fails the build if any target's documented arguments
+      contain a colon or a raw --flag, so neither trap can be reintroduced by a new target.
+      Stored in .env rather than in state/ because it is deployment configuration, not
+      run state, and .env is already the git-ignored home for that. Known limit: the
+      scheduler keeps its own copy of the time, so editing SYNC_AT by hand changes nothing
+      until the jobs are reinstalled - change-run-time reinstalls them, and says so when
+      no job is installed yet.

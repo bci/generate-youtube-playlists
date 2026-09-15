@@ -34,3 +34,9 @@ docs/turnover/
 # instead of editing the tree. Ignored is not the same as gone -- these are plaintext files
 # in the working directory, so nothing secret goes in one.
 .agent-pipe/
+
+# Agent mailbox, created on demand by the agent-pipe skill when two Claude sessions share
+# this working tree. CLAUDE.md already describes it as gitignored; this makes that true.
+# It holds working notes and proposed diffs — conversation, not history — and in a public
+# repo that is exactly the kind of thing that should never be pushed by accident.
+.agent-pipe/

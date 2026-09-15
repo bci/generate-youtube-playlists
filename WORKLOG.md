@@ -4,6 +4,230 @@ Newest first. Absolute dates only.
 
 ## 2026-09-15
 
+### An agent-pipe session, and the two defects it found
+
+Set up the mailbox at `.agent-pipe/` with `cli` (the terminal session) as the single writer,
+because that is the side holding the gates: `make ci`, the pre-push hook, the quota rules.
+The pipe README was tailored to name those by file rather than left generic — the skill is
+right that an untailored one makes the writer rule read as ceremony.
+
+Two real defects came out of it, and the interesting part is that neither was found by the
+side that wrote the code.
+
+**The check table documented 11 of 12 checks.** `targets` (`checkTargetArgs`) was emitting
+findings with no row describing it. I found it while drafting a message asking the other
+session to look for exactly that class of thing — which is its own lesson: the question was
+worth asking before the answer was worth outsourcing. Fixed, and then, on Kent's call, made
+unrepeatable: the `docs` check now verifies every check name `checks.js` emits has a row in
+that table. Scanned from the source rather than kept in a list beside it, because a list is
+one more thing to forget to update. Scanning's own failure mode — a regex that quietly
+matches nothing and reports a clean bill forever — is covered by treating "no names found"
+as a finding.
+
+**`JOBS.sync.at` and `JOBS.watchdog.at` were dead, in a stale format.** Left behind by
+FEAT-0014, which moved the times to `scheduleTimes()`. Nothing read them, and they still
+said `'3:00am'` — neither the `HHMM` the CLI takes nor the `HH:MM` `clockString()` writes.
+Dead code in a stale format is the worse kind: the next person to reach for `job.at` gets a
+string nothing else in the file would accept. The `JOBS` doc-comment still claimed to carry
+the hours, so that went too.
+
+That one also exercised the protocol properly. The other session was mid-cross-check of
+default schedule times when I found it, so the fix went out as a **rule-5 claim on
+`make.js`** before the edit — telling them their staged copy was going stale and not to
+spend a turn on it. That is the mechanism doing the job it exists for rather than being
+ceremony, which is the only evidence worth having about a convention.
+
+Worth recording about the channel itself: the other side verified out-of-tree, staging a
+copy into its own sandbox and running the suite there — 207/207, matching. An independent
+run on a copy is worth more than the writer re-running its own tests, and it cost the writer
+nothing.
+
+### `.agent-pipe/` is now actually git-ignored
+
+The link check's one standing warning turned out to be pointing at something real. CLAUDE.md
+describes the agent-pipe mailbox as "gitignored, so it holds working notes, not history" —
+and it was not in `.gitignore` at all. The skill creates `.agent-pipe/` on demand when two
+Claude sessions share this tree, and it holds conversation and proposed diffs; in a public
+repo that is precisely the category that must never be pushed by accident. Now ignored, and
+added to the checker's must-be-ignored list so that `git add -f` is caught rather than
+trusted.
+
+The warning itself was also wrong to emit. A git-ignored path is not part of the repo, so
+its absence in a fresh checkout is expected rather than rot, and the link check now skips
+ignored targets — consulted only for links that are already missing, so it costs nothing on
+the common path. A checker with one permanent known-false warning teaches people to skim
+past the whole report, which is the same failure as the thirteen false positives the
+relative-path bug produced.
+
+### Releasing a claim, pre-push checks, a configurable schedule — FEAT-0012/0013/0014
+
+**Unclaim completes a pair that was half-built.** FEAT-0010 could take an account over but
+not give one up; the README's answer to "how do I release it" was to delete the marker
+playlist by hand in the YouTube UI. `--unclaim-sync` deletes our own marker, `--unclaim-all`
+deletes every marker so the next machine to sync takes the account. The second also resolves
+the case `checkSyncMarker()` names and refuses: with two markers present it will not claim,
+because renaming onto an existing title would leave two playlists called the same thing.
+
+It gets its own terminal-only check rather than sharing `--claim-sync`'s, because the reason
+is worse rather than similar. An unattended claim flaps at 50 units a write. An unattended
+*unclaim* costs 100 a night indefinitely — the next run finds no marker and creates one:
+release, recreate, release — and **each half of that loop looks entirely correct in the log**,
+which is why it needs to be unreachable rather than discouraged. `make unclaim` also refuses
+while the nightly job is still installed here, since tonight's run would claim the account
+straight back; uninstall first, then unclaim, and `npm start -- --unclaim-sync` overrides.
+
+**`ci` now runs everything and reports everything.** The old one was lint-then-test and
+stopped at the first failure. Two things changed. It no longer short-circuits — "fix one, run
+again, find the next" is precisely how a pre-push gate becomes something people skip with
+`--no-verify` — and it gained `make check`, which looks for what lint and the tests cannot
+see.
+
+The two checks that justify the whole thing are the ones enforcing rules this repo already
+*states*. CLAUDE.md §12 says no addresses, ids or channel names in tracked files; that is now
+checked on every tracked file at error level, because a push is not reversible and a secret
+that reaches GitHub has to be rotated whether or not the commit is later removed. And
+AGENTS.md said of `features.yaml`: "Nothing enforces this automatically — there is no CI for
+it in this repo." That sentence was true when written and is now false, and the line has been
+rewritten rather than left to mislead.
+
+Error versus warning is a deliberate boundary, not a mood. Errors fail; warnings print and do
+not. **A warning that blocks a push is an error wearing a disguise**, and the honest response
+is to promote it rather than to teach people to bypass the hook. The bookkeeping check — code
+changed against upstream while WORKLOG/VERSIONS/features.yaml did not — is a warning for
+exactly that reason: it must not block a genuine one-line typo fix.
+
+`yaml` is the first new devDependency since eslint, and it needs the justification AGENTS.md
+asks for. A hand-written parser for a restricted subset would accept files that real YAML
+rejects, which is the wrong direction for a check whose whole job is "this still parses".
+Shelling out to python3+pyyaml needs no npm dependency but degrades to *skipped* on any
+machine without it — including, most likely, the Windows host that actually pushes, which is
+the one place the check has to work. 2.9.1, zero transitive dependencies.
+
+**Two bugs in the checker, both found by running it rather than by reading it.** Links were
+resolved from the repo root instead of from the file containing them, so all thirteen
+cross-references between the `docs/prompts/` files were reported as broken — a checker whose
+first output is thirteen false positives is a checker nobody runs twice. And probing for an
+external tool with `shell: true` plus an args array printed a DEP0190 deprecation on every
+run. Both fixed before it shipped. This is the same lesson as the PowerShell guard last
+session: a guard that has not been run is not yet a guard.
+
+**The shims now name their targets, because four separate reports said they should.** Over
+this session came "I do not see target uninstall", then `remove-channel`, then
+`list-channels` — every one of them a target that already existed and worked. The cause was
+the design: one generic forwarding rule means no target name appears in the Makefile, so
+reading the file, which is a perfectly ordinary way to use a Makefile, shows nothing. Both
+shims now carry a generated list between `>>> targets >>>` markers. Generated, not
+hand-kept, with `make sync-shims` to write it and a `shims` check to fail when it drifts —
+otherwise it becomes exactly the stale menu the generic design existed to avoid.
+
+**One syntax for both shims, which cost `HH:MM`.** The shims were drifting apart in the
+small ways that matter: `--max=1` worked in `build.ps1` but not under make, and a time had
+to be written `at=04:30` under make and `04:30` in PowerShell. A command learned on the Mac
+therefore failed on the Windows box, which defeats the point of having one implementation
+behind two shims.
+
+The fix is that both now take the same arguments in the same order, and the casualty is the
+colon. `make change-run-time 04:30` does not merely mis-parse — make reads the colon as a
+rule separator and dies with `multiple target patterns` **while parsing the Makefile**,
+before `make.js` is reached, so the code cannot report it however good the error message
+would have been. Quoting was the obvious escape and does not work: the shell strips the
+quotes before make ever sees the word. Verified for `"04:30"`, `'04:30'` and `04\:30`, all
+three identical failures. So times are four-digit `0430`. `HH:MM` is still parsed, because
+it is what people type and it is harmless where the shell allows it — it is simply not what
+the documentation teaches.
+
+The `at=04:30` workaround shipped earlier in this same session and was removed rather than
+kept as an alias: a spelling that exists only under make is exactly the inconsistency the
+change set out to delete. And because this trap was found twice now in two different shapes
+(`--max=1`, then `04:30`), `checkTargetArgs()` fails the build if any target's documented
+arguments contain a colon or a raw `--flag`. The next person to add a target does not get to
+rediscover it.
+
+**`change-run-time` moves the watchdog too, and that is the whole design.** Setting the sync
+to 09:00 while the watchdog stayed at 09:00 would have silently collided them, and a watchdog
+on the sync's own schedule is silent in exactly the case it exists to catch. So the watchdog
+follows six hours behind, always, and the command says so. The time reaches the plist by
+substitution into the rendered XML rather than by adding `__SYNC_HOUR__` placeholders to the
+templates: the README documents installing those by hand with `sed` on the two placeholders
+that exist, and a third would leave that documented path emitting a plist with a literal
+`__SYNC_HOUR__` in it — which launchd rejects while complaining about the file rather than
+the value.
+
+`change-email` was added in the same pass, and rewrites the single `REPORT_TO` line rather
+than regenerating `.env` from parsed pairs. `.env` is the only copy of the OAuth refresh
+token on this machine, and a regenerating helper would quietly drop the comments that say
+what each key is for.
+
+### Task runner built — FEAT-0011
+
+**The question was which task runner, not whether.** The obvious answer — a `Makefile` for
+macOS and a `build.ps1` for Windows, each implementing the targets — is what this rejects.
+It writes every target twice in two shell dialects and tests one of them per machine, and
+the cost is not hypothetical here: `add-channel` edits `config/channels.txt`, which already
+has a parser in `src/index.js`, so that shape would have produced a second parser in `sed`
+and a third in PowerShell. The version that shipped imports the real one and validates a
+new line with exactly the code that will read it at 3 AM.
+
+Node decided the language rather than preference. `package.json` pins 20.12+, so Node is
+the only interpreter both platforms are guaranteed to have; `make` is absent on Windows and
+PowerShell on macOS, which is the whole reason the question exists. So `make.js` holds
+every target, gets linted and tested with the rest of the project, and `Makefile` and
+`build.ps1` are ~40-line shims that never change when a target is added. `help` is rendered
+from the target registry, so the printed menu cannot drift from what runs.
+
+**Four silent failure modes, found by testing rather than reasoning.** Each one produces
+output that reads as success, which is why they are guarded rather than documented:
+
+- `make test` finds the `test/` **directory**, decides it is up to date, and runs nothing —
+  the same trap waits on `config/`, `docs/`, `logs/` and `state/`. Fixed with `.PHONY` over
+  `MAKECMDGOALS`.
+- `make run --dry-run` never passes `--dry-run` to anything. Make takes it as its own `-n`,
+  prints the recipe and executes nothing. The recipe is now marked `+` so it runs even
+  under `-n`, and `make.js` refuses when `MAKEFLAGS` shows what make kept.
+- `make run --max=1` is worse: make matches `--max` as an abbreviation of `--max-load` and
+  silently becomes `-l 1`, so the cap on writes against a live account disappears. Same
+  guard. The supported spelling is `max=1`, which survives because make hands `key=value`
+  words over in `MAKEOVERRIDES`; `ARGS='...'` is the escape hatch for anything else.
+- In PowerShell an unquoted `@Handle` is a splatting expression that expands to `$null`,
+  and PowerShell **drops nulls** when building a native command's argv. So `run @One` and
+  `run` are indistinguishable by the time Node sees them — and the second syncs every
+  channel in the list. The guard has to live in `build.ps1`, where `$args` still holds the
+  null; a first attempt in `make.js` could never have fired. It uses `-contains` rather
+  than a `Where-Object` pipeline because the pipeline matches correctly and then *emits the
+  `$null` it matched*, making `if (...)` false — a guard that silently never fires, which
+  is the exact failure shape it was written to catch.
+
+**`clean` deliberately cannot delete `state/`,** and a test asserts it. The watched ledger
+lives there and losing it makes the next run re-add every video it previously pruned, at
+50 units a write (CLAUDE.md §11). `remove-channel` is the same thought: it prints the line
+it removed verbatim, because the settings on it are not recoverable from anywhere else, and
+says plainly that the playlist and the ledger are untouched.
+
+**`doctor` is the target with the least obvious value and possibly the most.** It checks
+node against the `engines` floor, the presence of each required `.env` key **by name only**
+(this repo is public and that output gets pasted into issues), that every channel line
+parses, and whether `core.hooksPath` is set. Running it on this clone immediately found
+that the pre-push hook was never enabled here — which is exactly the class of thing nobody
+discovers until a push breaks something.
+
+**What is not verified.** The Windows scheduling half (`Register-ScheduledTask`,
+`Get-ScheduledTaskInfo`, `Start-ScheduledTask`) is written to the form the README already
+documents but has not been run on Windows; only the shim's argument handling was tested,
+against pwsh 7.6 on macOS. `setup`, `install`, `uninstall`, `run-now`, `authorize` and
+`claim` are unexercised for the same reasons they need care: they install system jobs, need
+a browser, or spend quota.
+
+**One mistake worth recording.** While testing the splatting guard I used `run` as the
+target, assuming the guard would stop it. It did not — that attempt is the one described
+above that could never fire — and a full Phase 1 sync ran against the live account. No
+writes occurred (every channel reported `0 to add`, Phase 2 inserted nothing, no removals,
+the foreign marker was reported and not claimed), so the cost was read quota only. But it
+did write this Mac's heartbeat, `report.html`, and one newly-seen watch into a ledger on a
+machine that is supposed to be inert. CLAUDE.md §11 says to exercise a change with
+`--dry-run` and a small `--max`, never a full sync, and the reason it says so is that a
+guard you have not yet proved is not a guard. Harmless targets (`version`, `list-channels`)
+are what the remaining tests used.
+
 ### Handover completed, and two findings from it
 
 **The Windows host claimed the account.** One marker remains, named for that machine, with
