@@ -57,6 +57,12 @@ kickstart: the job fired on time, resolved node through the wrapper fallback, ra
 `UserName` account (every file it wrote is owned by that user, not root), made the one
 change the preceding dry run predicted, emailed the report, and exited 0.
 
+**Docs fix, no behaviour change.** Every `@Handle` usage example is now quoted —
+`npm start -- "@SomeChannel"`. Unquoted, `@` is PowerShell's splatting sigil and the handle
+was parsed as an unset variable, so the one-channel examples in `README.md` and `AGENTS.md`
+had never run on the documented deployment platform. Double quotes rather than single, being
+the only form also correct in `cmd.exe` and in the macOS `sh` wrappers.
+
 ## 2026.09.12 — 2026-09-12 (Initial release)
 
 First public version. The repository starts here; nothing precedes it.

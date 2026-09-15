@@ -4,7 +4,7 @@
 #
 # This file is only used when you run the workflow WITHOUT a channel argument.
 # To process a single channel ad-hoc, pass it on the command line instead:
-#     npm start -- @SomeChannel
+#     npm start -- "@SomeChannel"
 #
 # Copy this file to `config/channels.txt` (git-ignored) and put your own handles in it.
 #
@@ -59,7 +59,7 @@
 #     collide with, so it defaults to plain "<Name>".
 #
 # Turning Shorts on backfills every Short at 50 quota units each, so try it first:
-#     npm start -- @SomeChannel --shorts=split --dry-run
+#     npm start -- "@SomeChannel" --shorts=split --dry-run
 # Turning it back off does NOT remove the Shorts already in a playlist.
 #
 # ---------------------------------------------------------------------------------

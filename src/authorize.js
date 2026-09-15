@@ -20,7 +20,7 @@ try {
   console.log('IMPORTANT: sign in as the Google account that will own the playlists.\n');
   await runAuthFlow();
   console.log('\n✅ Authorized. GOOGLE_REFRESH_TOKEN saved to .env');
-  console.log('\nYou can now run the workflow with:  npm start -- @SomeChannel');
+  console.log('\nYou can now run the workflow with:  npm start -- "@SomeChannel"');
 } catch (err) {
   console.error('\n❌ Authorization failed:\n');
   console.error(err.message || err);

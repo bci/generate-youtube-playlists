@@ -13,10 +13,42 @@ in launchd, `/Library/LaunchDaemons`, `~/Library/LaunchAgents` or cron.
 
 **PowerShell needs the handle quoted, and every Windows-facing example in this repo was
 wrong.** `@` begins a splatting/array expression in PowerShell, so `npm start -- @Handle`
-does not pass the handle through as text; `'@Handle'` does. The examples in README.md and
-AGENTS.md sit in ```powershell blocks and showed it bare. Now quoted, with one note in the
-README saying why — the quotes are harmless in cmd.exe and POSIX shells, so a single form
-works everywhere, and the note exists so nobody tidies them away as noise.
+does not pass the handle through as text — it is read as the variable `$Handle`, and the
+error names a variable the reader never wrote. The examples in README.md and AGENTS.md sit
+in ```powershell blocks and showed it bare, on the platform AGENTS.md names as the
+deployment target; they had never worked as written.
+
+**Double quotes, not single — this corrects the first version of this entry.** The fix as
+first pushed used `'@Handle'` and said the quotes were harmless in `cmd.exe`. They are not.
+Tested rather than assumed, by running both forms through `node -e` under each shell:
+
+```
+cmd.exe    '@SomeChannel'  ->  ["'@SomeChannel'"]   quotes passed through; broken
+cmd.exe    "@SomeChannel"  ->  ["@SomeChannel"]     correct
+PowerShell either form     ->  ["@SomeChannel"]     correct
+```
+
+`cmd.exe` has no concept of single quotes and hands them to the program as part of the
+argument, so the single-quoted form fails there — and `cmd.exe` is not hypothetical here:
+`run-sync.cmd` is what the Scheduled Task invokes, so it is a shell someone debugging this
+tool is likely to be sitting in. `"@Handle"` is the only form correct in all three shells
+this project touches, POSIX included, which is why `src/authorize.js` uses it: that line
+prints a suggested command without knowing which shell will read it.
+
+**Why it survived this long.** Nothing automated passes a handle — `run-sync.cmd` and the
+Scheduled Task call `npm start` with no positional argument and read `config/channels.txt`.
+The handle form is only ever typed by a person debugging one channel, which is the worst
+place to hide a broken example because it is reached during an incident.
+
+Coverage beyond the first pass: `config/channels.example.txt`, `config/channels.txt` and
+`src/authorize.js` carried the same bare form and are now quoted too. The channel-line
+*format* at README §"A channel line is…" is deliberately **not** quoted — it documents a
+file format, not a shell command, and quoting it would be a regression. One explanatory note
+in the README, not two; comment columns inside the two affected fences were re-padded so the
+added characters did not leave them ragged.
+
+Rejected: leaving the examples bare and explaining the quoting in prose alone. The person who
+needs that explanation is mid-error and copying a line, not reading the paragraph above it.
 
 **The hostname key churned within three days, which is the marker's predicted weakness now
 observed.** `os.hostname()` on the Mac went from `locasta` to `Mac.lan` — while

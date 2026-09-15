@@ -93,21 +93,23 @@ is written to `.env` (`GOOGLE_REFRESH_TOKEN`) so future runs need no browser.
 
 ## Usage
 
-> **Quote the handle in PowerShell.** `@` begins a splatting/array expression there, so a
-> bare `@SomeChannel` is not passed through as text — `'@SomeChannel'` is. `cmd.exe` and
-> POSIX shells do not care, and the quotes are harmless in both, so the examples below
-> always quote.
+> **Quote the handle, with double quotes.** `@` begins a splatting/array expression in
+> PowerShell, so a bare `@SomeChannel` is not passed through as text. `"@SomeChannel"` is
+> the one form that works in all three shells this project touches: `cmd.exe` does *not*
+> strip single quotes and would pass `'@SomeChannel'` through complete with them, while
+> POSIX shells accept either. The examples below always quote for that reason — they are
+> not noise to be tidied away.
 
 Process a single channel (dry run — shows what *would* happen, changes nothing):
 
 ```powershell
-npm start -- '@SomeChannel' --dry-run
+npm start -- "@SomeChannel" --dry-run
 ```
 
 Actually create/update the playlist for one channel:
 
 ```powershell
-npm start -- '@SomeChannel'
+npm start -- "@SomeChannel"
 ```
 
 Process every channel listed in `config/channels.txt` (no argument = use the config):
@@ -237,8 +239,8 @@ hand. (Same limitation as a video saved to a playlist by hand from another chann
 overriding the file:
 
 ```powershell
-npm start -- '@ABigChannel' --after=2026-01-01 --dry-run    # nothing is written
-npm start -- '@ABothChannel' --shorts=split --dry-run
+npm start -- "@ABigChannel" --after=2026-01-01 --dry-run  # nothing is written
+npm start -- "@ABothChannel" --shorts=split --dry-run
 npm start -- --after=2026-01-01 --older=keep              # real run, no deletions
 ```
 
