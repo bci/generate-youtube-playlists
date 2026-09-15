@@ -31,7 +31,7 @@
 # the date each feature was originally written.
 
 version: 1
-updated: 2026-09-12
+updated: 2026-09-15
 
 components:
   - id: core
@@ -224,6 +224,13 @@ features:
       host-move procedure copies state/ across, which would give both machines the same key
       and defeat the guard in exactly the case it exists for. Known limit: it only helps once every machine runs
       a build that writes the marker.
+      2026-09-15: handover to the Windows host completed - it renamed the existing marker
+      (same playlist id), so 50 units not 100. Two observations recorded in
+      docs/prompts/prompt-sync-marker-v2.md §3a: a stale marker reports a true-looking but
+      wrong "another machine is syncing" until claimed, and os.hostname() on the Mac churned
+      from locasta to Mac.lan within three days while ComputerName/LocalHostName did not -
+      so machineKey() is built from the least stable name macOS keeps. Both argue for the
+      report-never-block rule rather than against it; no code change made.
       Implemented as src/marker.js (pure: classifyMarker/checkClaimSync/machineKey take
       data and return decisions) plus listMyPlaylists/renamePlaylist in src/youtube.js and
       the phase-1 check in src/index.js. 23 new tests, 148 total, lint clean.

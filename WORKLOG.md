@@ -2,6 +2,37 @@
 
 Newest first. Absolute dates only.
 
+## 2026-09-15
+
+### Handover completed, and two findings from it
+
+**The Windows host claimed the account.** One marker remains, named for that machine, with
+the same playlist id as the one it took over — so `--claim-sync` renamed rather than
+recreated, 50 units not 100, as designed. The Mac stays inert: verified today that nothing is
+in launchd, `/Library/LaunchDaemons`, `~/Library/LaunchAgents` or cron.
+
+**PowerShell needs the handle quoted, and every Windows-facing example in this repo was
+wrong.** `@` begins a splatting/array expression in PowerShell, so `npm start -- @Handle`
+does not pass the handle through as text; `'@Handle'` does. The examples in README.md and
+AGENTS.md sit in ```powershell blocks and showed it bare. Now quoted, with one note in the
+README saying why — the quotes are harmless in cmd.exe and POSIX shells, so a single form
+works everywhere, and the note exists so nobody tidies them away as noise.
+
+**The hostname key churned within three days, which is the marker's predicted weakness now
+observed.** `os.hostname()` on the Mac went from `locasta` to `Mac.lan` — while
+`scutil --get ComputerName` and `LocalHostName` both still read `locasta`. `os.hostname()`
+returns the network-derived name, so `machineKey()` is built from the least stable of the
+three names macOS keeps: a live machine in that position stops recognising its own claim and
+reports a conflict against itself.
+
+It argues *for* the design rather than against it. Had a foreign marker been fatal instead of
+reportable, a router handing out a different name would have stopped the nightly sync — the
+exact self-inflicted outage the "report, never block" rule was chosen to avoid. The evidence
+also arrived in the mildest possible form: the Windows host's first post-pull run correctly
+reported the Mac's stale marker while the Mac had nothing scheduled, costing one email and no
+quota. The three candidate fixes and why none is free are recorded in
+`docs/prompts/prompt-sync-marker-v2.md` §3a rather than acted on.
+
 ## 2026-09-12 (later still)
 
 ### Sync marker built — FEAT-0010

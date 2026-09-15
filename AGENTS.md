@@ -46,8 +46,8 @@ test/*.test.js    node:test, no framework, mocked YouTube clients
 ```powershell
 npm install
 npm run authorize          # one-time browser OAuth, writes GOOGLE_REFRESH_TOKEN to .env
-npm start -- @Handle --dry-run    # safe: reads only, changes nothing
-npm start -- @Handle              # one channel
+npm start -- '@Handle' --dry-run  # safe: reads only, changes nothing
+npm start -- '@Handle'            # one channel (quote it: @ is PowerShell's splat sigil)
 npm start                         # every channel in config/channels.txt
 npm start -- --email-on-change    # what the scheduled task runs
 npm run watchdog -- --dry-run     # staleness check without sending

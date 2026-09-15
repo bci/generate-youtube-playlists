@@ -71,6 +71,37 @@ Against the live account, 2026-09-12:
 means deleting the marker and letting a run rebuild it — 100 units to cover three lines,
 where a mocked client covers it for nothing and is how every other YouTube test here works.
 
+## 3a. Observed 2026-09-15: the hostname key churned, and the marker went stale
+
+The handover to the Windows host completed — one marker, `gyp-sync-<windows-host>`, the same
+playlist id as before, so it renamed rather than recreated. Two things came out of the three
+days either side of it, both worth keeping.
+
+**A stale marker produces a true-looking but wrong alert.** The Windows host's first nightly
+run after pulling this build reported "another machine *is syncing* this account" while the
+Mac had nothing scheduled at all. The marker was left behind, not live, and the tool cannot
+tell those apart. The sync ran normally and the alert was one email — which is the "report,
+never block" rule earning its keep rather than failing. It repeats every night until claimed,
+so the claim belongs in the same sitting as the pull.
+
+**The Mac's hostname changed on its own, in three days.** `os.hostname()` went from `locasta`
+to `Mac.lan`, so `machineKey()` would now yield `Mac` — while `scutil --get ComputerName` and
+`LocalHostName` both still said `locasta`. `os.hostname()` reads the *network*-derived name,
+which means the key is built from the least stable of the three names macOS keeps. A live
+machine in that position stops recognising its own claim and reports a conflict against
+itself.
+
+That is the weakness §2 predicted, now observed rather than hypothetical, and it strengthens
+rather than undermines the "never block" decision: had a conflict been fatal, a router change
+would have stopped the nightly sync.
+
+The fix worth considering, and its catch: a `SYNC_MACHINE_KEY` env override, defaulting to
+the hostname, lets a machine pin its identity. The catch is that `.env` is copied wholesale
+during a host move, so it would have to be set deliberately per machine — the same trap that
+ruled out a stored uuid in `state/`. Reading `ComputerName` directly would be more accurate
+but needs `scutil`, which breaks the platform-neutral rule for `src/`. Not built; recorded
+so the next person weighs the same three options rather than rediscovering them.
+
 ## 4. The limitation to keep repeating
 
 **It only sees machines that write a marker.** A machine on an older build syncs on happily
