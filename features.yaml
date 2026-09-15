@@ -116,7 +116,7 @@ features:
       note, and a link to each playlist. Written to report.html every run.
     components: [core, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-12
     updated: 2026-09-15
     notes: >
@@ -177,7 +177,7 @@ features:
       the state/ migration.
     components: [ops]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-12
     updated: 2026-09-12
     notes: >
@@ -213,7 +213,7 @@ features:
       renaming it. The sync is never blocked.
     components: [core, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-12
     updated: 2026-09-12
     notes: >
@@ -261,7 +261,7 @@ features:
       with no target prints the generated list.
     components: [tooling, ops, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -311,7 +311,7 @@ features:
       units per marker.
     components: [core, tooling, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -345,7 +345,7 @@ features:
       reports all failures at once rather than stopping at the first.
     components: [tooling, qa, ops]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -403,7 +403,7 @@ features:
       are reinstalled so the scheduler picks the change up.
     components: [tooling, ops, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -445,7 +445,7 @@ features:
       that section's body. `make release dry=1` reports all of it and writes nothing.
     components: [tooling, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -480,7 +480,7 @@ features:
       maintenance commands. README gains an "Install from a release kit" section.
     components: [tooling, ops]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
@@ -517,7 +517,7 @@ features:
       never block. The example channels in config/channels.example.txt are commented out.
     components: [tooling, ops, qa]
     status: complete
-    release: Unreleased
+    release: 2026.09.15-84b809c
     added: 2026-09-15
     updated: 2026-09-15
     notes: >
