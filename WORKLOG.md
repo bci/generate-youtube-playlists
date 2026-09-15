@@ -4,6 +4,31 @@ Newest first. Absolute dates only.
 
 ## 2026-09-15
 
+### The report rendered as mojibake, and the bytes were never wrong
+
+`make report` showed `â€"` where an em dash belonged, `âš ï¸` for the warning triangle and
+`â€œ` for a curly quote. The obvious reading — something wrote the file in the wrong encoding
+— was wrong, and checking that first is what made the fix a one-liner instead of a rewrite of
+the writer. `file -I` reports `charset=utf-8`, `iconv -f UTF-8` round-trips clean, and the em
+dash on disk is `e2 80 94`. The bytes were correct the whole time.
+
+What was missing was the *declaration*. `buildHtml()` opened with
+`<!doctype html><html><body …>` — no `<head>`, no `<meta charset>`. That is invisible over
+HTTP, where the server supplies `Content-Type`, and this report is never served over HTTP: it
+is opened as a `file://` URL by `make report` and handed to Graph as a mail body. With no
+header to fall back on the browser guesses the locale default, which on the Windows box is
+cp1252, and every multi-byte sequence breaks apart on screen.
+
+Fixed by adding a `<head>` with `<meta charset="utf-8">`. The test asserts it is present *and*
+within the first 1024 bytes, because that is as far as browsers read before giving up and
+guessing anyway — a charset pushed past that boundary by some later addition to the template
+would be a silent regression of exactly this bug.
+
+Not changed: the Graph send path. It passes `contentType: 'HTML'` and Graph handles the
+transport encoding itself, so the meta tag is belt-and-braces there rather than the fix. The
+symptom was reported against the file, and the file is what was broken.
+
+
 ### An agent-pipe session, and the two defects it found
 
 Set up the mailbox at `.agent-pipe/` with `cli` (the terminal session) as the single writer,

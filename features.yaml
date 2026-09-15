@@ -116,10 +116,14 @@ features:
       note, and a link to each playlist. Written to report.html every run.
     components: [core, qa]
     status: complete
-    release: 2026.09.12
+    release: Unreleased
     added: 2026-09-12
-    updated: 2026-09-12
-    notes: Pure builder in src/report.js, so it is testable without an API key.
+    updated: 2026-09-15
+    notes: >
+      Pure builder in src/report.js, so it is testable without an API key. The document
+      declares <meta charset="utf-8"> as of 2026-09-15: it is read as a file:// URL and as
+      a mail body, neither of which supplies a Content-Type, so undeclared the em dashes,
+      curly quotes and warning triangle rendered as mojibake under Windows' cp1252 default.
 
   - id: FEAT-0006
     title: Emailed report via Microsoft Graph

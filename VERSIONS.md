@@ -6,6 +6,12 @@ project, so the version is documentary — it names the commit a deployment came
 
 ## Unreleased — macOS scheduling (FEAT-0009), the sync marker (FEAT-0010), the task runner (FEAT-0011), releasing a claim (FEAT-0012), pre-push checks (FEAT-0013) and a configurable schedule (FEAT-0014)
 
+**The report declares its encoding.** `report.html` now carries `<meta charset="utf-8">`
+(FEAT-0005). It is read as a `file://` URL and as a mail body, neither of which supplies a
+`Content-Type`, so without the declaration the browser fell back to the locale default —
+cp1252 on the Windows host — and every em dash, curly quote and the warning triangle rendered
+as mojibake. The file's bytes were valid UTF-8 throughout; only the label was missing.
+
 **Releasing a claim.** `--unclaim-sync` deletes this machine's sync marker; `--unclaim-all`
 deletes every marker, leaving the account for whichever machine syncs first. This completes
 the pair FEAT-0010 left open — claiming existed, releasing meant deleting a playlist by hand

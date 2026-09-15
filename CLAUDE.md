@@ -11,9 +11,9 @@ This file exists because LLMs make predictable mistakes when writing code. Not r
 These are not suggestions. These are rules. Follow them and you'll produce code that doesn't need to be rewritten. Ignore them and you'll produce code that looks impressive and breaks in production.
 
 <!-- CLAUDE-CORE:BEGIN v1 -->
-<!-- Managed by bci/claude-config. Do not edit here — edit core/CLAUDE.core.md there and
-     run `claude-doctor --sync`. `claude-doctor` fails when this block has drifted.
-     Project-specific rules go BELOW the END marker, where they are never overwritten. -->
+<!-- Shared rules, carried as a replaceable block. Do not edit inside these markers: an
+     update replaces everything between them. Repo-specific rules go BELOW the END marker,
+     where they are never overwritten. -->
 
 ## 1. Read Before You Write
 

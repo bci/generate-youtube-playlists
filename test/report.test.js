@@ -169,3 +169,15 @@ test('the account label is optional', () => {
   assert.match(buildHtml(rows, { account: 'someone@example.com' }), /account: someone@example.com/);
   assert.doesNotMatch(buildHtml(rows, {}), /account:/);
 });
+
+// The report is full of non-ASCII (em dashes, curly quotes, the warning triangle) and is
+// read as a file:// URL, where there is no Content-Type header to fall back on. Without a
+// declared charset the browser guesses the locale default — cp1252 on Windows — and every
+// one of those characters renders as mojibake. The bytes were always correct UTF-8; only
+// the declaration was missing.
+test('buildHtml declares UTF-8, so non-ASCII survives a file:// open', () => {
+  const html = buildHtml([], {});
+  assert.match(html, /<meta charset="utf-8">/i);
+  // The charset has to land in the first 1024 bytes or browsers ignore it.
+  assert.ok(html.indexOf('charset') < 1024, 'charset must be within the first 1024 bytes');
+});

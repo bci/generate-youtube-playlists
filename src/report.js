@@ -129,7 +129,12 @@ export function buildHtml(summaries, { dryRun = false, account = '', warning = '
   </p>`
     : '';
 
-  return `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#222">
+  // The charset is load-bearing, not boilerplate. This file is opened as a file:// URL
+  // (`make report`) and mailed as an HTML body, and neither carries a Content-Type the
+  // browser can fall back on. Undeclared, the em dashes, curly quotes and the ⚠️ above
+  // get read as the locale default — cp1252 on Windows — and render as mojibake. It must
+  // also stay within the first 1024 bytes, which is as far as browsers look.
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;color:#222">
   <h2>YouTube Playlists${dryRun ? ' (dry run)' : ''}</h2>
   <p style="color:#666">Generated ${esc(now)}${account ? ` — account: ${esc(account)}` : ''}</p>
   ${banner}
