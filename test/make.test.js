@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   CLEAN_PATHS,
+  envValues,
+  oauthReason,
+  placeholderKeys,
+  releaseHeading,
+  unreleasedSection,
+  versionString,
   channelLines,
   eatenMakeFlags,
   envKeysSet,
@@ -238,4 +245,84 @@ test('shimTargetBlock names every target under its group', () => {
     assert.ok(block.includes(name), `shim list omits ${name}`);
   }
   assert.ok(block.includes('Housekeeping'), 'group titles are kept');
+});
+
+// --- make release ------------------------------------------------------------------
+// The version string is documentary: there is no build step, so the only thing it can
+// usefully name is the commit a deployment came from.
+test('versionString names the date and the commit', () => {
+  assert.equal(versionString('7b0adf3', new Date('2026-09-15T12:00:00Z')), '2026.09.15-7b0adf3');
+});
+
+// checks.js reads a release NAME as everything before the first spaced dash, so the
+// separator in this heading decides whether features.yaml's `release:` values resolve.
+// A version containing a bare hyphen must survive that split intact.
+test('releaseHeading keeps the description and survives the checks.js name split', () => {
+  const h = releaseHeading('## Unreleased — the task runner (FEAT-0011)', '2026.09.15-7b0adf3', '2026-09-15');
+  assert.equal(h, '## 2026.09.15-7b0adf3 — 2026-09-15 (the task runner (FEAT-0011))');
+  // Mirror of checkManifest's parser in checks.js.
+  const name = h.replace(/^##\s+/, '').split(/\s+[-—]\s+/)[0].trim();
+  assert.equal(name, '2026.09.15-7b0adf3');
+});
+
+test('releaseHeading handles an Unreleased heading with no description', () => {
+  assert.equal(releaseHeading('## Unreleased', '2026.09.15-abc1234', '2026-09-15'), '## 2026.09.15-abc1234 — 2026-09-15');
+});
+
+test('unreleasedSection stops at the next release heading', () => {
+  const text = ['# Versions', '', '## Unreleased — new things', 'body one', 'body two', '', '## 2026.09.12 — 2026-09-12 (Initial release)', 'older'].join('\n');
+  const s = unreleasedSection(text);
+  assert.equal(s.heading, '## Unreleased — new things');
+  assert.equal(s.body, 'body one\nbody two');
+});
+
+test('unreleasedSection returns null when there is nothing to release', () => {
+  assert.equal(unreleasedSection('# Versions\n\n## 2026.09.12 — 2026-09-12 (Initial release)\nbody'), null);
+});
+
+// --- credentials are real, not merely present -------------------------------------
+// .env is created by COPYING .env.example, so every variable is non-empty from the moment
+// the file exists. "Is it set" therefore proves nothing on exactly the machine that is
+// about to be handed a 3 AM scheduled task.
+test('placeholderKeys spots values still carrying the template text', () => {
+  const example = 'GOOGLE_CLIENT_ID=your-client-id\nGOOGLE_CLIENT_SECRET=your-client-secret\n';
+  const env = 'GOOGLE_CLIENT_ID=your-client-id\nGOOGLE_CLIENT_SECRET=8Kd9-realish-secret\n';
+  assert.deepEqual(placeholderKeys(env, example, ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']), [
+    'GOOGLE_CLIENT_ID',
+  ]);
+});
+
+test('placeholderKeys reports nothing once the values are filled in', () => {
+  const example = 'GOOGLE_CLIENT_ID=your-client-id\n';
+  const env = 'GOOGLE_CLIENT_ID=1234.apps.googleusercontent.com\n';
+  assert.deepEqual(placeholderKeys(env, example, ['GOOGLE_CLIENT_ID']), []);
+});
+
+// An absent key is "missing", which the caller reports separately and more precisely.
+test('placeholderKeys does not claim a missing key is a placeholder', () => {
+  assert.deepEqual(placeholderKeys('', 'GOOGLE_CLIENT_ID=your-client-id\n', ['GOOGLE_CLIENT_ID']), []);
+});
+
+test('envValues keeps values and strips surrounding quotes', () => {
+  const v = envValues('A=plain\nB="quoted"\nC=\n# comment=no\n');
+  assert.equal(v.get('A'), 'plain');
+  assert.equal(v.get('B'), 'quoted');
+  assert.equal(v.get('C'), '');
+  assert.equal(v.has('# comment'), false);
+});
+
+// The raw OAuth errors name a field in a JSON body, which does not tell someone standing
+// at a new machine what to do next.
+test('oauthReason turns OAuth failures into next actions', () => {
+  assert.match(oauthReason(new Error('invalid_grant')), /authorize/);
+  assert.match(oauthReason(new Error('invalid_client')), /GOOGLE_CLIENT_ID/);
+  assert.match(oauthReason(new Error('getaddrinfo ENOTFOUND oauth2.googleapis.com')), /cannot reach/);
+});
+
+// An untouched config/channels.txt is a copy of the template. Every example in it is
+// commented out on purpose, so it parses cleanly and syncs nothing - which is why zero
+// channels has to be a failure rather than "all lines parse".
+test('the shipped channel template configures no channels', () => {
+  const template = fs.readFileSync(new URL('../config/channels.example.txt', import.meta.url), 'utf8');
+  assert.equal(channelLines(template).length, 0);
 });

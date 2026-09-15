@@ -4,7 +4,52 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
-## Unreleased — macOS scheduling (FEAT-0009), the sync marker (FEAT-0010), the task runner (FEAT-0011), releasing a claim (FEAT-0012), pre-push checks (FEAT-0013) and a configurable schedule (FEAT-0014)
+## Unreleased — macOS scheduling (FEAT-0009), the sync marker (FEAT-0010), the task runner (FEAT-0011), releasing a claim (FEAT-0012), pre-push checks (FEAT-0013), a configurable schedule (FEAT-0014), cutting a release (FEAT-0015), installing from a release kit (FEAT-0016), verified credentials before scheduling (FEAT-0017) and a charset on the report (FEAT-0005)
+
+**Credentials are verified before anything is scheduled.** `doctor` now proves the Google
+credentials work instead of reporting that the variables are non-empty, and `install`
+refuses to register the nightly job until they do and until `config/channels.txt` names at
+least one channel (FEAT-0017). The proof is an OAuth refresh-token exchange, which spends no
+YouTube Data API quota. Email credentials warn but never block — without them the run still
+works and writes `report.html`.
+
+This existed because `.env` and `config/channels.txt` are both created by *copying* their
+templates: every variable was non-empty and every line parsed on a machine where nothing had
+been configured, so `doctor` said "Ready". A placeholder is now defined as "identical to what
+`.env.example` ships", which cannot drift as the template changes. The example handles in
+`config/channels.example.txt` are commented out, so a fresh channel list is honestly empty
+rather than naming seven channels that do not exist.
+
+**Installing from a release kit.** A machine with no git, no `make` and no development
+tooling can now run the sync from a downloaded asset (FEAT-0016). `make release` attaches
+`youtube-playlists-<version>.zip` (about 230 KB); on the target machine `bootstrap.cmd`
+checks for Node, then runs `from-release`, which installs runtime dependencies, creates
+`.env` and `config/channels.txt` and prints the remaining steps and the maintenance commands.
+README gains an "Install from a release kit" section.
+
+The front door is a `.cmd` rather than a `make` target because Windows ships no `make`, and
+`build.ps1` is refused under the default execution policy. Node remains a manual prerequisite
+— it needs an administrator — so a missing Node prints the download link instead of
+`'node' is not recognized`. The kit is `git archive` of the tag, so it can only contain
+tracked files and `.env` / `state/` cannot reach a public asset even by mistake.
+
+Testing it on a bare kit exposed a structural bug: `make.js` imported `checks.js`, which
+imports the `yaml` devDependency, so on an `--omit=dev` install `make.js` would not load at
+all — the target that sets a kit up was the one target a kit could never run. `checks.js` is
+now loaded on demand by `check`, `ci` and `release`.
+
+**Cutting a release.** `make release` turns the `## Unreleased` section above into a named
+one (FEAT-0015). It derives `YYYY.MM.DD-<short sha>` from today and HEAD, rewrites this
+heading, repoints every features.yaml entry that said `Unreleased`, runs lint, tests and the
+checks against the *renamed* manifest, then commits, tags, pushes and creates a GitHub
+release whose notes are this section's body. `make release dry=1` reports all of it and
+writes nothing.
+
+Until now the version format was documented here and previewed by `make version`, but nothing
+produced one: the repo had no tags and no releases, and seven features had accumulated under
+a single Unreleased heading. The verification deliberately runs *after* the rename, because
+features.yaml `release:` values are cross-checked against these headings and verifying the
+old state would prove nothing about what is shipping; a failure rolls both files back.
 
 **The report declares its encoding.** `report.html` now carries `<meta charset="utf-8">`
 (FEAT-0005). It is read as a `file://` URL and as a mail body, neither of which supplies a

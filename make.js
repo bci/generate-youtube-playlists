@@ -22,7 +22,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { runAllChecks } from './checks.js';
+// checks.js is deliberately NOT imported here - see loadChecks() below.
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const IS_WINDOWS = process.platform === 'win32';
@@ -35,6 +35,11 @@ const ENV_TEMPLATE = path.join(ROOT, '.env.example');
 const STATE_DIR = path.join(ROOT, 'state');
 const LOG_DIR = path.join(ROOT, 'logs');
 const REPORT = path.join(ROOT, 'report.html');
+const VERSIONS_MD = path.join(ROOT, 'VERSIONS.md');
+const FEATURES_YAML = path.join(ROOT, 'features.yaml');
+// The release kit's archive name. Spelled out rather than taken from package.json's `name`,
+// because it is what someone downloads and unzips on a machine that knows nothing about npm.
+const KIT_NAME = 'youtube-playlists';
 const DAEMON_DIR = '/Library/LaunchDaemons';
 
 /**
@@ -73,6 +78,32 @@ export const CLEAN_PATHS = ['logs', 'report.html'];
 class Fail extends Error {}
 function fail(message) {
   throw new Fail(message);
+}
+
+/**
+ * Load checks.js on demand rather than at the top of this file.
+ *
+ * It imports `yaml`, a devDependency, so a static import makes make.js itself unloadable
+ * wherever dev dependencies were skipped - which is precisely the machine `from-release`
+ * exists for. It runs `npm install --omit=dev`, so a static import left a release kit
+ * unable to run the one target that sets it up: make.js failed to parse before any target
+ * was even chosen, with a module-resolution stack rather than anything actionable.
+ */
+async function loadChecks() {
+  try {
+    return await import('./checks.js');
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND') {
+      fail(
+        'the checks need development dependencies, which are not installed here.\n' +
+          '  Run `npm install` (without --omit=dev) to get them.\n' +
+          '  A release kit installs runtime dependencies only, so `check`, `ci` and\n' +
+          '  `release` are not available on a deployment machine - by design: the gate\n' +
+          '  belongs on the machine the code is edited on.'
+      );
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------------
@@ -520,6 +551,173 @@ export function envKeysSet(content) {
   return set;
 }
 
+/**
+ * Key -> value from a .env-style file. envKeysSet's sibling, keeping the values.
+ */
+export function envValues(content) {
+  const out = new Map();
+  for (const line of String(content).split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (m) out.set(m[1], m[2].trim().replace(/^["']|["']$/g, ''));
+  }
+  return out;
+}
+
+/**
+ * Which of `keys` still carry the value .env.example ships.
+ *
+ * A placeholder is defined as "identical to what the template says" rather than as
+ * anything that looks suspicious. That needs no judgement about what a real client id
+ * resembles, and it cannot drift: change the template and this follows automatically.
+ *
+ * It matters because `from-release` and `setup` both create .env by copying the template,
+ * so every variable is non-empty from the moment the file exists. Checking that a value
+ * is set therefore proves nothing at all on a fresh machine - which is exactly the machine
+ * about to be handed a 3 AM scheduled task.
+ */
+export function placeholderKeys(envText, exampleText, keys) {
+  const env = envValues(envText);
+  const example = envValues(exampleText);
+  return keys.filter((k) => {
+    const v = env.get(k);
+    return Boolean(v) && example.has(k) && v === example.get(k);
+  });
+}
+
+/**
+ * Turn an OAuth failure into something worth acting on. The raw errors name a field in a
+ * JSON body, which does not tell someone standing at a new machine what to do next.
+ */
+export function oauthReason(err) {
+  const msg = String(err?.response?.data?.error_description || err?.response?.data?.error || err?.message || err);
+  if (/invalid_grant/i.test(msg)) {
+    return 'the refresh token is expired, revoked, or belongs to a different client - run `authorize` again';
+  }
+  if (/invalid_client|unauthorized_client/i.test(msg)) {
+    return 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not a valid pair for this project';
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|socket hang up/i.test(msg)) {
+    return `cannot reach Google's OAuth endpoint (${msg})`;
+  }
+  return msg;
+}
+
+/**
+ * Prove the Google credentials are real, by exchanging the refresh token for an access
+ * token.
+ *
+ * This hits the OAuth token endpoint, which costs NO YouTube Data API quota - the same
+ * property test/credentials.test.js relies on - so it is safe to run on every doctor and
+ * before every install. It is also the strongest check available without spending quota:
+ * it proves the client id, the secret and the refresh token are a working set, not merely
+ * three non-empty strings.
+ */
+async function verifyGoogleCredentials() {
+  try {
+    process.loadEnvFile(ENV_FILE);
+  } catch {
+    // A missing or unreadable .env is reported by the caller, which knows more about it.
+  }
+  try {
+    const { getAuthorizedClient } = await import('./src/auth.js');
+    const auth = await getAuthorizedClient();
+    const res = await auth.getAccessToken();
+    if (!res?.token) return { ok: false, reason: 'the OAuth token endpoint returned no access token' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: oauthReason(err) };
+  }
+}
+
+/**
+ * Refuse to schedule a job whose credentials have never been shown to work.
+ *
+ * This is the one check that has to be a gate rather than a report. Everything else here
+ * is run by someone who is watching; a scheduled task runs at 3 AM at a machine nobody is
+ * sitting at, and a credential failure there is silent - the sync exits, no report is
+ * written, and the only signal is the watchdog 36 hours later. Installing is the last
+ * moment a person is present to be told.
+ *
+ * Email credentials deliberately do NOT gate: without them the run still does its work and
+ * writes report.html, so a missing mailbox is a degraded feature and not a dead job.
+ */
+async function requireRealGoogleCredentials() {
+  if (!exists(ENV_FILE)) {
+    fail(`no .env - run \`${invocation()} from-release\` (or \`setup\`), then fill in the Google credentials.`);
+  }
+  const envText = fs.readFileSync(ENV_FILE, 'utf8');
+  const set = envKeysSet(envText);
+  const missing = REQUIRED_ENV.filter((k) => !set.has(k));
+  if (missing.length) {
+    fail(
+      `${missing.join(', ')} is not set in .env.\n` +
+        '  The nightly job cannot authenticate without it, and would fail silently at 3 AM.'
+    );
+  }
+
+  const exampleText = exists(ENV_TEMPLATE) ? fs.readFileSync(ENV_TEMPLATE, 'utf8') : '';
+  const stillTemplate = placeholderKeys(envText, exampleText, REQUIRED_ENV);
+  if (stillTemplate.length) {
+    fail(
+      `${stillTemplate.join(', ')} still hold the values from .env.example.\n` +
+        '  .env is created by copying that template, so every variable is non-empty from\n' +
+        '  the start - being "set" is not evidence of anything. Fill these in, then run\n' +
+        `  \`${invocation()} authorize\`.`
+    );
+  }
+
+  console.log('\n  Checking the YouTube credentials actually work (no quota is spent) ...');
+  const google = await verifyGoogleCredentials();
+  if (!google.ok) {
+    fail(
+      `the Google credentials do not work: ${google.reason}\n\n` +
+        '  Nothing has been scheduled. A job installed now would fail every night at 3 AM\n' +
+        '  without sending anything, because the report is only mailed after a run that\n' +
+        `  authenticated. Fix the credentials, confirm with \`${invocation()} doctor\`, then\n` +
+        '  install again.'
+    );
+  }
+  console.log('  Credentials verified.');
+}
+
+/**
+ * Refuse to schedule a job that has nothing to do.
+ *
+ * Same shape as the placeholder credentials: config/channels.txt is created by copying
+ * config/channels.example.txt, and every example in it is commented out, so an untouched
+ * file is valid, parses cleanly and syncs nothing at all. A scheduled task on top of it
+ * runs every night, succeeds, reports zero channels and looks entirely healthy - and the
+ * watchdog stays quiet, because the sync really did finish.
+ */
+async function requireAtLeastOneChannel() {
+  if (!exists(CHANNELS)) {
+    fail(
+      `no ${rel(CHANNELS)} - run \`${invocation()} from-release\` (or \`setup\`), then add a channel with\n` +
+        `  \`${invocation()} add-channel "@Handle"\`.`
+    );
+  }
+  const lines = channelLines(fs.readFileSync(CHANNELS, 'utf8'));
+  if (!lines.length) {
+    fail(
+      `${rel(CHANNELS)} has no channels in it.\n` +
+        '  It is copied from the template, whose examples are all commented out, so an\n' +
+        '  untouched file is valid and syncs nothing. A job scheduled on it would run every\n' +
+        '  night, do no work, and report success - the watchdog would never fire.\n' +
+        `  Add one with \`${invocation()} add-channel "@Handle"\`.`
+    );
+  }
+  // Parse with the tool's own parser: a malformed line is fatal at 3 AM.
+  const parse = await channelParser();
+  for (const l of lines) {
+    try {
+      parse(l.text.trim());
+    } catch (err) {
+      fail(`${rel(CHANNELS)} line ${l.lineNo}: ${err.message.split('\n')[0]}`);
+    }
+  }
+  console.log(`  ${lines.length} channel${lines.length === 1 ? '' : 's'} configured.`);
+}
+
 /** Node's own version against the floor in package.json engines. */
 export function meetsEngine(current, required) {
   const want = String(required).replace(/^[^\d]*/, '').split('.').map(Number);
@@ -561,18 +759,45 @@ async function doctorChecks() {
   if (!exists(ENV_FILE)) {
     checks.push(bad('.env', `missing - run \`${invocation()} setup\`, then fill it in`));
   } else {
-    const set = envKeysSet(fs.readFileSync(ENV_FILE, 'utf8'));
+    const envText = fs.readFileSync(ENV_FILE, 'utf8');
+    const set = envKeysSet(envText);
+    const exampleText = exists(ENV_TEMPLATE) ? fs.readFileSync(ENV_TEMPLATE, 'utf8') : '';
+
     const missing = REQUIRED_ENV.filter((k) => !set.has(k));
-    checks.push(
-      missing.length
-        ? bad('.env credentials', `${missing.join(', ')} not set`)
-        : ok('.env credentials', 'Google client id, secret and refresh token set')
-    );
+    const stillTemplate = placeholderKeys(envText, exampleText, REQUIRED_ENV);
+    if (missing.length) {
+      checks.push(bad('.env credentials', `${missing.join(', ')} not set`));
+    } else if (stillTemplate.length) {
+      // .env is created by copying .env.example, so "set" is the default state of every
+      // variable. Saying so is the difference between "Ready" and the truth.
+      checks.push(
+        bad('.env credentials', `${stillTemplate.join(', ')} still hold the .env.example placeholder - fill them in`)
+      );
+    } else {
+      checks.push(ok('.env credentials', 'Google client id, secret and refresh token set'));
+    }
+
+    // The live proof. Costs no YouTube quota, and is the only check here that can tell a
+    // plausible-looking credential from a working one.
+    if (!missing.length && !stillTemplate.length) {
+      const google = await verifyGoogleCredentials();
+      checks.push(
+        google.ok
+          ? ok('youtube auth', 'refresh token exchanges for an access token')
+          : bad('youtube auth', google.reason)
+      );
+    } else {
+      checks.push(warn('youtube auth', 'not checked - fill the Google credentials in first'));
+    }
+
     const noMail = EMAIL_ENV.filter((k) => !set.has(k));
+    const mailTemplate = placeholderKeys(envText, exampleText, EMAIL_ENV);
     checks.push(
       noMail.length
         ? warn('.env email', `${noMail.join(', ')} not set - the report will not be emailed`)
-        : ok('.env email', 'Microsoft Graph sender and recipient set')
+        : mailTemplate.length
+          ? warn('.env email', `${mailTemplate.join(', ')} still hold placeholders - the report will not be emailed`)
+          : ok('.env email', 'Microsoft Graph sender and recipient set')
     );
   }
 
@@ -585,7 +810,14 @@ async function doctorChecks() {
       const parse = await channelParser();
       const lines = channelLines(fs.readFileSync(CHANNELS, 'utf8'));
       for (const l of lines) parse(l.text.trim());
-      checks.push(ok('channel list', `${lines.length} channel${lines.length === 1 ? '' : 's'}, all lines parse`));
+      // Zero is not a passing state. channels.txt is copied from the template, whose
+      // examples are all commented, so an untouched file parses perfectly and syncs
+      // nothing - which reads as "all lines parse" unless it is called out.
+      checks.push(
+        lines.length
+          ? ok('channel list', `${lines.length} channel${lines.length === 1 ? '' : 's'}, all lines parse`)
+          : bad('channel list', `no channels yet - add one with \`${invocation()} add-channel "@Handle"\``)
+      );
     } catch (err) {
       checks.push(bad('channel list', err.message.split('\n')[0]));
     }
@@ -598,12 +830,19 @@ async function doctorChecks() {
       : warn('watched ledger', 'state/ does not exist yet - the first run creates it')
   );
 
-  const hooks = capture('git', ['config', 'core.hooksPath']).out;
-  checks.push(
-    hooks === '.githooks'
-      ? ok('git hooks', 'pre-push runs lint and tests')
-      : warn('git hooks', `core.hooksPath is "${hooks || 'unset'}" - run \`${invocation()} setup\``)
-  );
+  // A release kit is an export of tracked files, so it has no .git and no push to hook.
+  // Advising `setup` there sends someone to a command that fails on a directory that is
+  // not a repository, in the one workflow least equipped to tell that from a real problem.
+  if (!exists(path.join(ROOT, '.git'))) {
+    checks.push(ok('git hooks', 'not a git checkout - no pre-push hook needed here'));
+  } else {
+    const hooks = capture('git', ['config', 'core.hooksPath']).out;
+    checks.push(
+      hooks === '.githooks'
+        ? ok('git hooks', 'pre-push runs lint and tests')
+        : warn('git hooks', `core.hooksPath is "${hooks || 'unset'}" - run \`${invocation()} setup\``)
+    );
+  }
 
   return checks;
 }
@@ -881,7 +1120,8 @@ export function targetGroups() {
           name: 'check',
           summary: 'everything lint and the tests cannot see: secrets, manifest, links, endings',
           async run() {
-            const findings = await runAllChecks({
+            const { runAllChecks } = await loadChecks();
+    const findings = await runAllChecks({
               targetNames: allTargetNames(),
               targets: targetGroups().flatMap((g) => g.items),
               shims: shimState(),
@@ -905,7 +1145,8 @@ export function targetGroups() {
                 failed.push(label);
               }
             }
-            const findings = await runAllChecks({
+            const { runAllChecks } = await loadChecks();
+    const findings = await runAllChecks({
               targetNames: allTargetNames(),
               targets: targetGroups().flatMap((g) => g.items),
               shims: shimState(),
@@ -952,8 +1193,10 @@ export function targetGroups() {
         {
           name: 'install',
           summary: `register the nightly sync and the watchdog (${IS_MACOS ? 'needs sudo, once' : 'Task Scheduler'})`,
-          run() {
+          async run() {
             requireKnownPlatform('install');
+            await requireRealGoogleCredentials();
+            await requireAtLeastOneChannel();
             // One machine per account: a second scheduler re-adds what the first pruned,
             // because the watched ledger is per-machine (AGENTS.md). Say so before
             // installing rather than after the videos start reappearing.
@@ -1072,6 +1315,91 @@ export function targetGroups() {
           },
         },
         {
+          name: 'from-release',
+          summary: 'set a release kit up on a machine with no dev tooling: deps, .env, channels, next steps',
+          run() {
+            // A kit is an export of tracked files, so it has no .git. `setup` would try to
+            // point git at .githooks here and fail on a directory that is not a repository -
+            // and the pre-push hook it enables is meaningless on a box that never pushes.
+            const isKit = !exists(path.join(ROOT, '.git'));
+            console.log(`\n  Setting up in ${ROOT}`);
+            console.log(`  Source: ${isKit ? 'release kit (no git checkout)' : 'git checkout'}`);
+
+            // --omit=dev: the deployment box runs the sync, it does not lint or push. This
+            // skips eslint and leaves `make ci` unavailable here, which is the right trade -
+            // the gate belongs on the machine the code is edited on.
+            console.log('\n  Installing runtime dependencies (this takes a minute).');
+            if (!IS_WINDOWS) {
+              run('npm', ['install', '--omit=dev']);
+            } else {
+              console.log('\n$ npm install --omit=dev');
+              const r = spawnSync('npm install --omit=dev', { cwd: ROOT, stdio: 'inherit', shell: true });
+              if (r.error) fail(`could not run npm: ${r.error.message}`);
+              if (r.status !== 0) {
+                fail(
+                  'npm install failed.\n' +
+                    '  The usual cause is no route to the npm registry. This kit deliberately does\n' +
+                    '  not vendor its dependencies (they are 239 MB), so the first run needs network.'
+                );
+              }
+            }
+
+            if (!isKit) run('git', ['config', 'core.hooksPath', '.githooks']);
+
+            for (const line of [
+              copyIfMissing(ENV_TEMPLATE, ENV_FILE, 'fill in your credentials'),
+              copyIfMissing(CHANNELS_TEMPLATE, CHANNELS, 'put your own handles in it'),
+            ]) {
+              console.log(`  ${line}`);
+            }
+            fs.mkdirSync(LOG_DIR, { recursive: true });
+
+            const me = invocation();
+            console.log(`
+  Dependencies are in. Three things left, in this order:
+
+    1. Edit .env
+       Google credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) are required.
+       The email variables are optional - without them you read report.html instead.
+       README.md, "One-time setup", has the Google Cloud walkthrough.
+
+    2. Edit config/channels.txt
+       One @Handle per line. \`${me} add-channel "@Handle"\` appends a validated line.
+
+    3. \`${me} authorize\`   - opens a browser once and writes the refresh token to .env
+       \`${me} doctor\`      - confirms this machine can actually run
+       \`${me} dry-run\`     - reads everything, writes nothing. Always run this first.
+       \`${me} install\`     - registers the 3 AM sync and the watchdog
+
+  Day to day, nothing needs doing - but when something looks wrong:
+
+    ${me} status     is the job installed, and when did a sync last finish
+    ${me} report     open the last run's report
+    ${me} logs       the tail of logs/sync.log
+    ${me} doctor     re-check credentials, config and the Node version
+
+  One machine syncs one account. If another machine has been syncing this
+  account, disable its schedule first - two schedulers undo each other's
+  deletions at 50 quota units a write. ${me} claim takes the account over.`);
+          },
+        },
+        {
+          name: 'release',
+          args: '[dry=1]',
+          summary: 'cut a release: name the Unreleased section after HEAD, tag it, publish it on GitHub',
+          async run(words) {
+            const dry = words.some((w) => w === 'dry=1' || w === 'dry=true');
+            const rest = words.filter((w) => !/^dry=/.test(w));
+            if (rest.length) {
+              fail(
+                `release takes no arguments except dry=1, got: ${rest.join(' ')}\n` +
+                  '  The version is derived from today and HEAD; it is not something to pass in.'
+              );
+            }
+            await cutRelease({ dry });
+          },
+        },
+        {
           name: 'version',
           summary: 'what this checkout is: package version, commit, node, platform',
           run() {
@@ -1082,13 +1410,200 @@ export function targetGroups() {
             console.log(`  commit   ${sha}${dirty}`);
             console.log(`  node     ${process.version} (needs ${pkg.engines?.node})`);
             console.log(`  platform ${process.platform} ${process.arch}`);
-            console.log(`  version string: ${new Date().toISOString().slice(0, 10).replace(/-/g, '.')}-${sha}`);
+            console.log(`  version string: ${versionString(sha)}`);
           },
         },
         { name: 'help', summary: 'this list', run: () => console.log(renderHelp(targetGroups())) },
       ],
     },
   ];
+}
+
+// ---------------------------------------------------------------------------------
+// Releasing
+// ---------------------------------------------------------------------------------
+
+/**
+ * The version string a checkout at `sha` would release as: `YYYY.MM.DD-<short sha>`.
+ *
+ * Documentary, not semantic - there is no build step, so the only thing a version can
+ * usefully name is the commit a deployment came from. Shared with `make version` so the
+ * string it previews and the string `make release` writes cannot drift apart.
+ */
+export function versionString(sha, now = new Date()) {
+  return `${now.toISOString().slice(0, 10).replace(/-/g, '.')}-${sha}`;
+}
+
+/**
+ * Turn the `## Unreleased` heading into a released one, preserving the description.
+ *
+ * The ` \u2014 ` separator is load-bearing: checks.js reads a release's *name* as
+ * everything before the first spaced dash, so changing the separator here silently
+ * renames every release and breaks the features.yaml `release:` cross-reference.
+ *
+ * Pure, so the format is testable without a git checkout or a network.
+ */
+export function releaseHeading(unreleasedHeading, version, date) {
+  // The separator is optional: a bare "## Unreleased" is a legitimate heading, and a
+  // required dash here would silently turn the whole heading into the description.
+  const desc = String(unreleasedHeading).replace(/^##\s+Unreleased\s*(?:[-\u2014]\s*)?/, '').trim();
+  return `## ${version} \u2014 ${date}${desc ? ` (${desc})` : ''}`;
+}
+
+/**
+ * Split VERSIONS.md into the Unreleased heading, its body, and the rest.
+ * Returns null when there is no Unreleased section at all.
+ */
+export function unreleasedSection(text) {
+  const lines = String(text).split('\n');
+  const start = lines.findIndex((l) => /^##\s+Unreleased\b/.test(l));
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return { lines, start, end, heading: lines[start], body: lines.slice(start + 1, end).join('\n').trim() };
+}
+
+/**
+ * Cut a release: name the Unreleased section after HEAD, repoint every feature that
+ * pointed at "Unreleased", verify, commit, tag and publish on GitHub.
+ *
+ * The order is deliberate. The books are rewritten *before* `ci` runs, because the
+ * features.yaml `release:` values and the VERSIONS.md headings are cross-checked against
+ * each other (checkManifest) - verifying the old state would prove nothing about the
+ * state being shipped. If that verification fails the edits are rolled back, so a failed
+ * release leaves the tree exactly as it found it rather than half-renamed.
+ *
+ * The tag is pushed before the GitHub release is created because `gh release create`
+ * against a tag the remote has never seen creates the tag itself, from whatever the
+ * remote's default branch happens to point at - which is not necessarily what was tested.
+ */
+async function cutRelease({ dry }) {
+  // A release names a commit, so the tree has to *be* that commit. Tagging a dirty tree
+  // publishes a name for something nobody else can check out.
+  const dirty = capture('git', ['status', '--porcelain']).out;
+  if (dirty) {
+    fail(
+      'the working tree has uncommitted changes.\n' +
+        '  A release tags a commit; commit or stash first, so the tag names what was tested.'
+    );
+  }
+
+  const sha = capture('git', ['rev-parse', '--short', 'HEAD']).out;
+  if (!sha) fail('not a git checkout - there is no commit to name a release after');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const version = versionString(sha);
+
+  if (capture('git', ['rev-parse', '-q', '--verify', `refs/tags/${version}`]).status === 0) {
+    fail(`tag ${version} already exists - this commit was released today already`);
+  }
+
+  const section = unreleasedSection(fs.readFileSync(VERSIONS_MD, 'utf8'));
+  if (!section) fail(`no "## Unreleased" heading in ${rel(VERSIONS_MD)} - there is nothing to release`);
+  if (!section.body) fail(`the Unreleased section in ${rel(VERSIONS_MD)} is empty - nothing to release`);
+
+  // Probe authorisation before doing any work. gh resolves credentials per host, not per
+  // repo, so the active account can easily be one with no write access here - and that
+  // failure would otherwise surface only at the very last step, after the tag was pushed.
+  const who = capture('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
+  if (who.error) fail('gh is not installed - it is what creates the GitHub release');
+  if (who.status !== 0) {
+    fail(
+      `gh cannot reach this repository:\n  ${who.out}\n` +
+        '  Check `gh auth status`: the active account may not have write access here.'
+    );
+  }
+
+  const heading = releaseHeading(section.heading, version, today);
+  const featuresBefore = fs.readFileSync(FEATURES_YAML, 'utf8');
+  const repointed = featuresBefore.split('release: Unreleased').length - 1;
+
+  console.log(`\n  releasing ${version}`);
+  console.log(`  repo      ${who.out}`);
+  console.log(`  heading   ${heading}`);
+  console.log(`  features  ${repointed} entry(s) move from Unreleased to ${version}`);
+  console.log(`  notes     ${section.body.split('\n').length} line(s) from the Unreleased section`);
+
+  if (dry) {
+    console.log('\n  dry run: nothing written, nothing tagged, nothing published.');
+    console.log(`  Run \`${invocation()} release\` to do it for real.`);
+    return;
+  }
+
+  // --- edit the books -------------------------------------------------------------
+  const versionLines = [...section.lines];
+  versionLines[section.start] = heading;
+  fs.writeFileSync(VERSIONS_MD, versionLines.join('\n'));
+
+  const featuresAfter = featuresBefore
+    .split('release: Unreleased')
+    .join(`release: ${version}`)
+    .replace(/^updated: .*$/m, `updated: ${today}`);
+  fs.writeFileSync(FEATURES_YAML, featuresAfter);
+
+  const rollback = () => {
+    fs.writeFileSync(VERSIONS_MD, section.lines.join('\n'));
+    fs.writeFileSync(FEATURES_YAML, featuresBefore);
+  };
+
+  // --- verify what is about to ship, not what was there before ---------------------
+  console.log('\n  Verifying the renamed manifest before anything is published.');
+  try {
+    npmScript('lint');
+    npmScript('test');
+    const { runAllChecks } = await loadChecks();
+    const findings = await runAllChecks({
+      targetNames: allTargetNames(),
+      targets: targetGroups().flatMap((g) => g.items),
+      shims: shimState(),
+    });
+    report(findings);
+    if (findings.some((f) => f.level === 'error')) throw new Fail('checks found errors against the renamed manifest');
+  } catch (err) {
+    rollback();
+    fail(
+      `${err.message}\n  The release was abandoned and VERSIONS.md / features.yaml were ` +
+        'restored, so the tree is as you left it.'
+    );
+  }
+
+  // --- commit, tag, push ------------------------------------------------------------
+  run('git', ['add', rel(VERSIONS_MD), rel(FEATURES_YAML)]);
+  run('git', ['commit', '-m', `Release ${version}`]);
+  run('git', ['tag', '-a', version, '-m', `Release ${version}`]);
+  run('git', ['push', 'origin', 'HEAD']);
+  run('git', ['push', 'origin', version]);
+
+  // --- publish ----------------------------------------------------------------------
+  // Notes go through a file rather than an argument: the body is multi-line Markdown and
+  // passing it inline would be at the mercy of the shell on whichever platform runs this.
+  const notes = path.join(os.tmpdir(), `gyp-release-${version}.md`);
+  fs.writeFileSync(notes, `${section.body}\n`);
+
+  // The kit is `git archive` of the tag, not a copy of the working directory. That is a
+  // safety property, not a convenience: it can only contain tracked files, so .env,
+  // state/ and logs/ cannot reach a public release asset even by mistake (CLAUDE.md 12).
+  // It deliberately does not vendor node_modules - 239 MB per release, frozen at release
+  // time - so `from-release` runs npm install on first use.
+  const kit = path.join(os.tmpdir(), `${KIT_NAME}-${version}.zip`);
+  run('git', ['archive', '--format=zip', `--prefix=${KIT_NAME}-${version}/`, '-o', kit, version]);
+  const kitSize = (fs.statSync(kit).size / 1024).toFixed(0);
+  console.log(`\n  kit ${path.basename(kit)} (${kitSize} KB)`);
+
+  try {
+    run('gh', ['release', 'create', version, '--title', version, '--notes-file', notes, kit]);
+  } finally {
+    fs.rmSync(notes, { force: true });
+    fs.rmSync(kit, { force: true });
+  }
+
+  console.log(`\n  Released ${version}.`);
+  console.log(`  Add the next change under a new "## Unreleased" heading in ${rel(VERSIONS_MD)}.`);
 }
 
 // ---------------------------------------------------------------------------------

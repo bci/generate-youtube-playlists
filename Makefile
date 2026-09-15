@@ -59,6 +59,8 @@
 #     report           open the last run’s report.html
 #     logs             the tail of logs/sync.log (default 40 lines)
 #     clean            delete logs/ and report.html - never state/, which holds the watched ledger
+#     from-release     set a release kit up on a machine with no dev tooling: deps, .env, channels, next steps
+#     release          cut a release: name the Unreleased section after HEAD, tag it, publish it on GitHub
 #     version          what this checkout is: package version, commit, node, platform
 #     help             this list
 # <<< targets <<<

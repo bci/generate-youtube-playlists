@@ -12,6 +12,7 @@ it builds an HTML report table and can email it to the address you configure.
 
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
+- [Install from a release kit](#install-from-a-release-kit) — no git, no dev tooling
 - [One-time setup](#one-time-setup)
 - [Targets — `make` and `build.ps1`](#targets--make-and-buildps1)
 - [Usage](#usage) — [flags](#flags), [per-channel settings](#per-channel-settings)
@@ -45,6 +46,83 @@ it builds an HTML report table and can email it to the address you configure.
 
 Beyond that it is `npm install`. There is no database and no long-running service: the only
 persistent state is `state/*.json` (the watched ledger) and the generated `report.html`.
+
+---
+
+## Install from a release kit
+
+For putting this on the machine that will actually run it at 3 AM — a box with no git, no
+`make`, and nobody who wants to learn either. If you are working on the code instead, skip to
+[One-time setup](#one-time-setup).
+
+### What you need first
+
+**Node.js 20.12 or newer.** This is the one prerequisite nothing here can install for you —
+it needs an administrator. Get it from <https://nodejs.org/en/download>, the Windows
+Installer (`.msi`), LTS, 64-bit; accept the defaults.
+
+Everything else the kit does itself.
+
+### The five minutes
+
+1. Open the [latest release](https://github.com/bci/generate-youtube-playlists/releases/latest) and download
+   `youtube-playlists-<version>.zip` from **Assets** (about 230 KB).
+2. Unzip it somewhere permanent — `C:\YouTubePlaylists` is a good choice. **Not** Downloads,
+   and not a OneDrive-synced folder: the scheduled task will run from this path every night,
+   and `state/` here is the record of what you have already watched.
+3. Double-click **`bootstrap.cmd`**.
+
+That checks for Node, installs the dependencies, creates `.env` and `config/channels.txt`
+from their templates, and prints the remaining steps. If Node is missing it says so, with the
+download link, instead of failing with `'node' is not recognized`.
+
+> **Why a `.cmd` and not `make from-release`.** Windows does not ship `make` at all, and
+> `.\build.ps1` is refused under the default execution policy with *"running scripts is
+> disabled on this system"*. A `.cmd` file has neither problem and works on a double-click.
+> It calls `.\build.ps1 from-release` for you, with the policy bypassed for that one call —
+> nothing on the machine is changed.
+
+### Then, in this order
+
+`bootstrap.cmd` prints these too, so you do not need to keep this page open:
+
+| Step | Command | What it does |
+| ---- | ------- | ------------ |
+| 1 | *edit `.env`* | Google credentials. [One-time setup](#one-time-setup) has the Google Cloud walkthrough. The email variables are optional — without them you read `report.html` instead. |
+| 2 | `.\build.ps1 add-channel "@Handle"` | One channel per line in `config/channels.txt`. Quote the handle — `@` is PowerShell's splat sigil. |
+| 3 | `.\build.ps1 authorize` | Opens a browser once, writes the refresh token to `.env`. |
+| 4 | `.\build.ps1 doctor` | Confirms this machine can actually run: Node version, credentials, channel list. |
+| 5 | `.\build.ps1 dry-run` | Reads everything, writes nothing. **Always run this before the first real sync.** |
+| 6 | `.\build.ps1 install` | Registers the 3 AM sync and the watchdog. Needs an administrator, once. |
+
+### Maintenance
+
+Nothing needs doing day to day — that is the point of the watchdog. When something looks
+wrong:
+
+| Command | Answers |
+| ------- | ------- |
+| `.\build.ps1 status` | Is the job installed, and when did a sync last finish? |
+| `.\build.ps1 report` | Opens the last run's `report.html`. |
+| `.\build.ps1 logs` | The tail of `logs/sync.log` (`logs n=200` for more). |
+| `.\build.ps1 doctor` | Re-checks credentials, config and the Node version. |
+| `.\build.ps1 change-run-time 0430` | Moves the sync; the watchdog follows six hours later. Four-digit 24-hour, no colon. |
+
+**If the report stops arriving,** the watchdog emails `ERROR_ALERT_TO` when no sync has
+finished in 36 hours — one late run is tolerated, two missed nights are not. If that mail
+arrives, start with `status` and then `logs`.
+
+**Upgrading to a later release.** Download the new kit, unzip it *beside* the old folder, and
+copy three things across from the old one: `.env`, `config/channels.txt`, and the whole
+`state/` directory. Then run `bootstrap.cmd` in the new folder and `.\build.ps1 install`
+again. `state/` is the ledger of what you have already watched — without it the next sync
+re-adds every video you have ever pruned, at 50 quota units each.
+
+> **One machine syncs one account.** If another machine has been syncing this account,
+> disable its schedule *before* this one starts. Two schedulers undo each other's deletions
+> nightly, and the symptom — a couple of videos reappearing — looks far too small to
+> investigate. The tool leaves a marker on the account and will tell you; see
+> [the sync marker](#the-sync-marker).
 
 ---
 
@@ -125,6 +203,8 @@ npm run make         # anywhere, if you would rather not use either shim
 | `change-run-time` | move the nightly sync (`change-run-time 0430`); the watchdog follows six hours later |
 | `run-now` | trigger the scheduled sync through the scheduler itself |
 | `report`, `logs`, `clean`, `version` | open the last report, tail the log, delete `logs/` and `report.html` — **never `state/`**, which holds the watched ledger — identify this checkout |
+| `from-release` | set a release kit up on a machine with no dev tooling: install deps, create `.env` and `config/channels.txt`, print the remaining steps. What `bootstrap.cmd` calls — see [Install from a release kit](#install-from-a-release-kit) |
+| `release` | cut a release: name the `## Unreleased` section after HEAD, tag it, publish it on GitHub. `release dry=1` shows what it would do |
 | `help` | the generated list — the same one `Makefile` and `build.ps1` carry as a comment |
 
 **Why two shims and one implementation.** Windows does not ship `make` and macOS does not

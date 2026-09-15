@@ -4,6 +4,145 @@ Newest first. Absolute dates only.
 
 ## 2026-09-15
 
+### "Ready" was a lie on every new machine
+
+Flagged at the end of the release-kit work and fixed here: `doctor` reported a brand-new
+machine as **Ready**. Both `.env` and `config/channels.txt` are created by *copying* their
+templates, so every variable is non-empty and every line parses from the moment the files
+exist. The checks asked "is it set" and "do the lines parse". An untouched machine answered
+yes to both. Kent's framing is the right one: the YouTube credentials being real is a
+*need*; mail is a nice-to-have.
+
+**A placeholder is "identical to what .env.example ships"** — not "looks like a placeholder".
+That needs no judgement about what a real client id resembles, and it cannot drift: change
+the template and the check follows automatically. Comparing against a hand-written list of
+suspicious strings would have been wrong within one edit of the template.
+
+**The live proof costs nothing.** Exchanging the refresh token for an access token hits the
+OAuth token endpoint, not the Data API, so no quota is spent — the property
+`test/credentials.test.js` has always relied on. It is also the strongest check available for
+free: it proves the client id, secret and refresh token are a working *set*, not three
+plausible strings. `doctor` now runs it every time.
+
+**`install` gates rather than warns, and that asymmetry is the point.** Everything else here
+is read by someone who is watching. A scheduled task runs at 3 AM at a machine nobody is
+sitting at, where a credential failure is silent: the sync exits, no report is written, and
+the only signal is the watchdog 36 hours later. Installing is the last moment a person is
+present to be told. Email never gates — without it the run still works and writes
+`report.html`, so a missing mailbox is a degraded feature, not a dead job.
+
+Failing to *reach* the OAuth endpoint blocks too. That looks harsh but is the same endpoint
+the nightly sync needs, so a machine that cannot reach it cannot do the job anyway.
+
+**The channel list had the identical bug, and a worse failure mode.** `channels.example.txt`
+ended with seven live handles, so a fresh `config/channels.txt` configured seven channels
+that do not exist — a nightly job resolving nothing and reporting seven errors on a machine
+whose owner had not added anything yet. They are now commented out, which makes the honest
+starting state *zero* channels, so `install` refuses an empty list and `doctor` stops calling
+it "all lines parse".
+
+Zero channels is the more dangerous of the two, because it does not look like a failure at
+all: the run succeeds, reports nothing to do, and **the watchdog stays quiet — the sync
+really did finish.** A credential failure at least leaves a dead heartbeat.
+
+**Known limit, written down rather than papered over:** this proves the credentials
+authenticate. It does not prove the account owns the playlists, and it does not prove the
+YouTube Data API is enabled on the project. Both cost quota to establish, so both are left
+to the first `dry-run`.
+
+### Installing from a release kit, and the import that made it impossible
+
+`make release` now attaches `youtube-playlists-<version>.zip` (230 KB) to the GitHub
+release, and a machine with no git, no `make` and nobody who wants to learn either can run
+the sync from it: unzip, double-click `bootstrap.cmd`, follow six numbered steps. README
+gains an "Install from a release kit" section with the maintenance commands.
+
+**The entry point could not be what was asked for.** `make from-release` cannot work on the
+deployment platform — Windows ships no `make` at all, and `build.ps1` is refused under the
+default execution policy with *"running scripts is disabled on this system."* A `.cmd` has
+neither problem and runs on a double-click, so `bootstrap.cmd` is the front door and calls
+`build.ps1 from-release` with the policy bypassed for that one call. The target still exists
+and still works once Node is present; it is just not the thing a new machine can start with.
+
+Node itself stays a manual prerequisite — installing it needs an administrator — so a missing
+Node prints the download link and what to click, rather than `'node' is not recognized`. It
+is looked for on PATH and then at `C:\Program Files\nodejs\node.exe`, the fallback
+`run-sync.cmd` has always used, because a freshly installed Node is often not yet on PATH in
+a window that was already open.
+
+**The kit is `git archive` of the tag, not a copy of the working directory.** That is a
+safety property rather than a convenience: it can only contain tracked files, so `.env`,
+`state/` and `logs/` cannot reach a public release asset even by mistake (§12). Verified by
+extracting one and diffing its `.env` against `.env.example` — byte-identical.
+
+It does not vendor `node_modules`. At 239 MB per release, with dependencies frozen at release
+time, the offline version costs more than it buys on a box that already reaches YouTube and
+Graph every night. The npm failure path says so explicitly instead of surfacing an exit code.
+
+**What testing it on a real bare kit found.** `make.js` imported `checks.js` at the top, and
+`checks.js` imports `yaml` — a *devDependency*. `from-release` runs `npm install --omit=dev`,
+so on a kit `make.js` could not be loaded at all: it died with an `ERR_MODULE_NOT_FOUND`
+stack before any target was chosen, which meant the one target that sets a kit up was the one
+target a kit could never run. `checks.js` is now loaded on demand by the three targets that
+need it (`check`, `ci`, `release`), and a kit asking for them gets a sentence explaining that
+the gate belongs on the machine the code is edited on, not a module-resolution trace.
+
+This is the whole argument for running the thing rather than reasoning about it. Nothing in
+the diff looked wrong, `make ci` was green throughout, and the bug was structural — it would
+have shipped, and it would have failed on the first machine anyone tried it on.
+
+The same run showed `doctor` advising a kit user to run `make setup` to fix `core.hooksPath`
+— a command that fails on a directory that is not a repository, offered in the workflow least
+able to tell that from a real fault. It now reports no hook is needed when there is no `.git`.
+
+**Known, not fixed:** `doctor` reports placeholder credentials as present and says *Ready*,
+because it checks that a variable is non-empty rather than that it is real. On a fresh kit
+that is actively misleading — `.env` is copied from `.env.example`, so every variable is
+"set" before anyone has filled anything in. It predates this change and fixing it means
+deciding what counts as a placeholder, so it is flagged rather than guessed at.
+
+### `make release` — the version format existed, nothing produced one
+
+VERSIONS.md has described the format `YYYY.MM.DD-<commitID>` since the initial release, and
+`make version` printed a preview of what this checkout's string *would* be. Nothing ever
+wrote one. The repo had **no git tags at all** and no GitHub releases, and seven of fourteen
+features had piled up under a single `## Unreleased` heading — the format was documentation
+of an intention, not a process.
+
+The ordering decisions are where the work was, and none of them are obvious from the diff:
+
+**The books are rewritten before the verification runs, not after.** `checkManifest` in
+checks.js cross-checks every features.yaml `release:` value against the VERSIONS.md headings,
+so renaming the heading without repointing the features breaks the build — which means
+running `ci` *before* the rename proves nothing about what is being shipped. It has to verify
+the renamed state. The cost is that a failure leaves edited files, so a failed verification
+rolls both files back; an abandoned release leaves the tree exactly as it found it.
+
+**The tag is pushed before `gh release create`.** Given a tag the remote has never seen, gh
+creates the tag itself — from whatever the remote's default branch points at, which is not
+necessarily the commit that was tested. Pushing first makes the release name the tested
+commit rather than a coincidence.
+
+**Authorisation is probed up front with `gh repo view`.** This came directly out of today's
+403: gh resolves credentials per *host*, not per repo, so with two accounts in the keyring
+the active one can easily be the one without write access. Discovered at the last step, that
+failure lands *after* the tag is already pushed, leaving a tagged commit and no release. A
+probe costs one API call and moves the failure to before anything is written.
+
+**The separator in the heading is load-bearing.** checks.js reads a release's name as
+everything before the first spaced dash, so `## 2026.09.15-7b0adf3 — 2026-09-15 (…)` parses
+to `2026.09.15-7b0adf3` — the hyphen inside the version survives because it has no spaces
+around it. A different separator would silently rename every release. That is pinned by a
+test that mirrors the checks.js parser rather than restating the expected string.
+
+Writing the tests found a real bug before it shipped: `releaseHeading()` required the dash,
+so a bare `## Unreleased` heading — perfectly legitimate — fell through the replace and became
+its own description, producing `## … (## Unreleased)`. The separator is now optional.
+
+`dry=1` exists because a tag and a GitHub release are public and awkward to retract, which is
+the same reasoning §11 applies to quota: the cheap rehearsal comes first.
+
+
 ### The report rendered as mojibake, and the bytes were never wrong
 
 `make report` showed `â€"` where an em dash belonged, `âš ï¸` for the warning triangle and

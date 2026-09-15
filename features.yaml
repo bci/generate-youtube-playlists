@@ -435,3 +435,114 @@ features:
       scheduler keeps its own copy of the time, so editing SYNC_AT by hand changes nothing
       until the jobs are reinstalled - change-run-time reinstalls them, and says so when
       no job is installed yet.
+
+  - id: FEAT-0015
+    title: Cutting a release - make release
+    description: >
+      `make release` names the `## Unreleased` section in VERSIONS.md after HEAD
+      (YYYY.MM.DD-<short sha>), repoints every features.yaml entry that pointed at
+      "Unreleased", verifies, commits, tags and publishes a GitHub release whose notes are
+      that section's body. `make release dry=1` reports all of it and writes nothing.
+    components: [tooling, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      Before this the version format existed only as a sentence in VERSIONS.md's preamble
+      and a preview line in `make version`; nothing produced one, there were no git tags in
+      the repo's history and no GitHub releases, so seven of fourteen features had
+      accumulated under a single "Unreleased" heading.
+      The books are rewritten before the verification runs, not after, because
+      checkManifest cross-checks features.yaml `release:` values against VERSIONS.md
+      headings - verifying the pre-rename state would prove nothing about the state being
+      shipped. A failed verification rolls both files back, so an abandoned release leaves
+      the tree exactly as it found it rather than half-renamed.
+      The tag is pushed before `gh release create` runs: given a tag the remote has never
+      seen, gh creates one itself from the remote's default branch, which is not
+      necessarily the commit that was tested.
+      Authorisation is probed with `gh repo view` up front rather than discovered at the
+      final step, because gh resolves credentials per host and not per repo - the active
+      account can easily be one without write access here, and that failure would otherwise
+      land after the tag had already been pushed.
+      Known limit: it always releases HEAD as of today, so the version cannot be chosen or
+      backdated, and re-running on the same commit on the same day is refused by the
+      existing-tag check rather than producing a second name for one commit.
+
+  - id: FEAT-0016
+    title: Release kit install - bootstrap.cmd and from-release
+    description: >
+      A machine with no git, no make and no development tooling can run the sync from a
+      downloaded release asset. `make release` attaches `youtube-playlists-<version>.zip`
+      (about 230 KB) to the GitHub release; on the target machine `bootstrap.cmd` checks for
+      Node and calls `from-release`, which installs runtime dependencies, creates .env and
+      config/channels.txt from their templates and prints the remaining steps and the
+      maintenance commands. README gains an "Install from a release kit" section.
+    components: [tooling, ops]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      The entry point is a .cmd rather than a make target because the literal request -
+      `make from-release` - cannot work on the deployment platform: Windows ships no make,
+      and build.ps1 is refused under the default execution policy with "running scripts is
+      disabled on this system". bootstrap.cmd has neither problem, runs on a double-click,
+      and invokes build.ps1 with -ExecutionPolicy Bypass for that one call. The target
+      itself still exists and is what the .cmd calls, so `make from-release` does work once
+      Node is present.
+      Node.js remains a genuine manual prerequisite - installing it needs an administrator -
+      so a missing Node is reported as instructions and a download link rather than as
+      "'node' is not recognized". Node is looked for on PATH and then at
+      C:\Program Files\nodejs\node.exe, the same fallback run-sync.cmd already uses, because
+      a freshly installed Node is often not yet on PATH in an already-open window.
+      The kit is `git archive` of the tag rather than a copy of the working directory. That
+      is a safety property: it can only contain tracked files, so .env, state/ and logs/
+      cannot reach a public asset even by mistake.
+      It does not vendor node_modules - 239 MB per release, and dependencies frozen at
+      release time - so the first run needs a route to the npm registry. Chosen knowing the
+      deployment box has one, since it reaches YouTube and Microsoft Graph nightly; an npm
+      install failure says this explicitly rather than reporting a bare exit code.
+      Installs with --omit=dev, so eslint is absent and `make ci` does not run on the
+      deployment box. That is deliberate - the gate belongs on the machine the code is
+      edited on - but it does mean a kit machine cannot self-verify beyond `doctor`.
+
+  - id: FEAT-0017
+    title: Verified credentials and a non-empty channel list before scheduling
+    description: >
+      `doctor` proves the Google credentials work rather than reporting that the variables
+      are non-empty, and `install` refuses to register the nightly job until they do and
+      until config/channels.txt names at least one channel. The proof is an OAuth refresh
+      token exchange, which costs no YouTube Data API quota. Email credentials warn but
+      never block. The example channels in config/channels.example.txt are commented out.
+    components: [tooling, ops, qa]
+    status: complete
+    release: Unreleased
+    added: 2026-09-15
+    updated: 2026-09-15
+    notes: >
+      Both .env and config/channels.txt are created by COPYING their templates, so on a
+      fresh machine every variable is non-empty and the channel file parses cleanly. The
+      old checks asked "is it set" and "do the lines parse", which both answered yes to an
+      untouched machine - `doctor` said "Ready" before anyone had configured anything, and
+      that is precisely the machine about to be handed a 3 AM scheduled task.
+      A placeholder is defined as "identical to the value .env.example ships" rather than
+      as anything that looks suspicious. That needs no judgement about what a real client
+      id resembles and cannot drift: change the template and the check follows.
+      The live proof exchanges the refresh token for an access token against the OAuth
+      token endpoint, which spends no Data API quota - the property test/credentials.test.js
+      already relied on. It is the strongest check available for free, because it proves the
+      client id, secret and refresh token are a working SET rather than three strings.
+      install gates rather than warns because a scheduled task runs where nobody is
+      watching: a credential failure at 3 AM is silent, no report is written, and the only
+      signal is the watchdog 36 hours later. Installing is the last moment a person is
+      present to be told. An empty channel list is worse still - the run succeeds, reports
+      zero channels and the watchdog stays quiet, because the sync really did finish.
+      Email deliberately does not gate: without it the run still does its work and writes
+      report.html, so a missing mailbox is a degraded feature, not a dead job.
+      A failure to REACH the OAuth endpoint also blocks, and that is intentional rather
+      than an oversight: it is the same endpoint the nightly sync depends on, so a machine
+      that cannot reach it cannot run the job either.
+      Known limit: the check proves the credentials authenticate, not that the account they
+      belong to is the one that owns the playlists, and not that the YouTube Data API is
+      enabled on the project - both cost quota to establish.

@@ -68,10 +68,22 @@
 #
 # --after=, --older= and --shorts= apply the same settings to a whole run and
 # override this file, which is how to try one out before committing it here.
-@SomeChannel
-@AnotherChannel
-@ABigChannel          after=2026-01-01
-@AnotherBigChannel    after=2026-01-01 older=keep
-@AShortsOnlyChannel   shorts=only
-@AChannelThatPostsBoth  shorts=split
-@AndOneWithItsOwnName   shorts=split shorts-title="Custom Clips Playlist"
+# ---------------------------------------------------------------------------------
+# Worked examples. These are COMMENTED OUT on purpose.
+#
+# This file is copied to config/channels.txt verbatim by `setup` and `from-release`, so
+# anything left live here becomes the configuration of a brand-new machine. Uncommented,
+# these seven handles do not exist, so the nightly job would resolve nothing, report seven
+# errors and look broken - on a machine whose owner has not yet added a single channel of
+# their own. An empty channel list is the honest starting state, and `install` refuses to
+# schedule a job until there is at least one real line here.
+#
+# Delete the # from a line to use it as a starting point, or just add your own.
+#
+#@SomeChannel
+#@AnotherChannel
+#@ABigChannel          after=2026-01-01
+#@AnotherBigChannel    after=2026-01-01 older=keep
+#@AShortsOnlyChannel   shorts=only
+#@AChannelThatPostsBoth  shorts=split
+#@AndOneWithItsOwnName   shorts=split shorts-title="Custom Clips Playlist"
