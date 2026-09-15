@@ -110,6 +110,13 @@ proposes). In short:
 - **One machine syncs an account** — Windows or macOS, never both. The ledger is per-machine,
   so a second scheduler re-adds what the first pruned. A host move is: copy `state/`, then
   disable the old host's jobs.
+- **One machine pushes at a time — and `git fetch` before you *start*, not just before you
+  push.** Git refuses a non-fast-forward, so commits are never silently lost; that refusal is
+  the structural backstop and it is not what this rule is for. What gets lost is the *effort*
+  of two agents independently fixing the same thing, which is what happened on 2026-09-15
+  when both hosts fixed the same PowerShell quoting bug in different ways. The live host owns
+  the remote by default; the idle machine proposes through a `docs/turnover/` note or the
+  mailbox rather than pushing. Don't mistake the convention for the backstop.
 - A cutoff deletion is *forgotten* by the ledger, never banked as a watch — otherwise
   lifting an `after=` date would hold those videos out for good.
 - One channel is read once however many playlists its line asks for. The expensive reads

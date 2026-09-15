@@ -65,6 +65,30 @@ reported the Mac's stale marker while the Mac had nothing scheduled, costing one
 quota. The three candidate fixes and why none is free are recorded in
 `docs/prompts/prompt-sync-marker-v2.md` §3a rather than acted on.
 
+### A remote-side rule, after two hosts fixed one bug twice
+
+Added a guardrail beside invariant 10: one machine pushes at a time, and `git fetch` before
+you *start* rather than only before you push. The live host owns the remote; the idle machine
+proposes through `docs/turnover/` or the mailbox.
+
+**What it is and is not protecting.** Git already refuses a non-fast-forward, so no commit
+was ever at risk of being silently lost — the structural guarantee was never missing. What
+was unprotected is duplicated effort: both hosts independently found and fixed the same
+PowerShell quoting bug, and the collision was caught by a hand-carried turnover doc plus a
+`git fetch`, neither of which is structural. The rule is written to say exactly that, because
+a reader who mistakes it for the thing preventing data loss will also mistake its absence for
+danger and reach for something heavier than it needs.
+
+**The duplicate was not wasted, as it happens.** The Windows host's fix was the better one —
+double quotes rather than single, because single quotes are not quote characters in
+`cmd.exe` and would have been passed through as literal apostrophes, turning the handle into
+`'@Handle'`. It also caught two places the Mac missed: the example printed by
+`src/authorize.js` on completion, and the comments in `config/channels.example.txt`. The
+first of those matters most — that hint reaches the user at the moment they are most likely
+to copy it verbatim. Recorded because "the duplicate work produced a better answer" is a real
+outcome, and a rule written to prevent duplication should be honest that this is what it
+sometimes costs.
+
 ## 2026-09-12 (later still)
 
 ### Sync marker built — FEAT-0010
