@@ -38,12 +38,21 @@ src/auth.js       Google OAuth2 client from env vars + the interactive authorize
 src/authorize.js  `npm run authorize` entry point
 src/heartbeat.js  Writes/reads state/last-run.json; the pure staleness rule
 src/watchdog.js   `npm run watchdog` entry point — alerts when the sync goes quiet
+src/marker.js     The sync marker: which machine owns this account (pure rules)
 test/*.test.js    node:test, no framework, mocked YouTube clients
 
 make.js           Task runner: every maintenance action, and their only implementation
 checks.js         The pre-push checks behind `make check` / `make ci` (pure rules)
 Makefile          Shim → make.js, so `make <target>` works (macOS)
 build.ps1         Shim → make.js, so `.\build.ps1 <target>` works (Windows)
+eslint.config.js  ESLint flat config behind `npm run lint`
+
+run-sync.sh / run-watchdog.sh     launchd wrappers (POSIX sh, LF only)
+run-sync.cmd / run-watchdog.cmd   Task Scheduler wrappers
+launchd/*.plist                   LaunchDaemon templates (`make install` fills them in)
+bootstrap.cmd                     Windows double-click setup for a release kit
+.githooks/pre-push                runs `node make.js ci`
+docs/prompts/                     durable prompts (see "Prompts" below)
 ```
 
 ## Commands
@@ -130,6 +139,13 @@ Deliberately phased, because quota runs out mid-run and the report still has to 
 - **Comments explain *why*, and especially why-not.** Most non-obvious lines here exist
   because something failed in production once. Preserve that reasoning when you edit; add
   it when you introduce a rule.
+- **Every declaration carries JSDoc** (CLAUDE.md core section 11): a `@module` block at the
+  top of every `.js` file, including tests, and `/** */` on every function, method, class
+  and module-level constant — private ones too — with `@param {type}`, `@returns {type}`
+  and `@throws`. Shared object shapes are `@typedef`s (`PlaylistStatus`, `ChannelSpec`,
+  `Ledger`, `Finding`, `Target`, ...). `build.ps1` uses comment-based help
+  (`Get-Help .\build.ps1 -Full` works); the `.sh` wrappers carry Google-style headers.
+  Write the doc with the code, not afterwards.
 - **Tests mock the YouTube client**, they never call it. `test/credentials.test.js` is the
   one exception: it hits the OAuth token endpoints only (no Data API quota), and skips
   itself when the matching env vars are absent, so a fresh clone still passes.
@@ -163,6 +179,18 @@ proposes). In short:
 - One channel is read once however many playlists its line asks for. The expensive reads
   (uploads listing, Shorts probe) are per channel; don't move them behind the seam.
 - No addresses, ids or channel names in tracked files.
+
+## Not done yet
+
+Facts, as of 2026-10-16:
+
+- **Scheduling knows macOS and Windows only.** `install`, `status`, `uninstall` and
+  `run-now` refuse any other platform; elsewhere, schedule `run-sync.sh` yourself.
+- **Email is Microsoft Graph only.** There is no SMTP or other sender.
+- **Nothing proves the account owns the playlists before the first `dry-run`.** `doctor`
+  verifies the Google credentials authenticate (no quota), not what they can see.
+- **`test/credentials.test.js` skips itself without a `.env`**, so a fresh clone's
+  `npm test` reports 3 skipped tests by design.
 
 ## Worklog / versions / features discipline
 

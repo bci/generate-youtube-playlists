@@ -14,12 +14,34 @@
  *
  * Everything here is pure: it takes the playlist titles the API already returned and
  * returns a decision, so the rule is testable without a client, a network or a key.
+ *
+ * @module marker
  */
 
+/**
+ * A playlist as {@link module:youtube.listMyPlaylists} returns it.
+ *
+ * @typedef {object} PlaylistRef
+ * @property {string} id - Playlist id.
+ * @property {string} title - Playlist title.
+ */
+
+/**
+ * Result of {@link classifyMarker}.
+ *
+ * @typedef {object} MarkerClassification
+ * @property {'none'|'ours'|'foreign'} state - Who holds the account.
+ * @property {?PlaylistRef} ours - Our own marker, when present.
+ * @property {PlaylistRef[]} foreign - Every marker that is not ours.
+ */
+
+/** Title prefix every sync marker carries. */
 export const MARKER_PREFIX = 'gyp-sync-';
 
-// Playlist titles are free text; a key is not. Keep it to what reads back unambiguously
-// in a title, so `gyp-sync-<key>` can be split on the prefix without escaping rules.
+/**
+ * Playlist titles are free text; a key is not. Keep it to what reads back unambiguously
+ * in a title, so `gyp-sync-<key>` can be split on the prefix without escaping rules.
+ */
 const UNSAFE_KEY_CHARS = /[^A-Za-z0-9-]+/g;
 
 /**
@@ -28,6 +50,9 @@ const UNSAFE_KEY_CHARS = /[^A-Za-z0-9-]+/g;
  * The domain part is dropped: macOS reports `name.local` on one network and `name.lan`
  * on another for the same Mac, and a key that changes with the DHCP lease would report
  * a conflict against itself. The leading label is the stable half.
+ *
+ * @param {string} hostname - Usually `os.hostname()`.
+ * @returns {string} A non-empty key of `[A-Za-z0-9-]`; `unknown` when nothing usable is left.
  */
 export function machineKey(hostname) {
   const host = String(hostname || '').trim().split('.')[0];
@@ -37,15 +62,32 @@ export function machineKey(hostname) {
   return key || 'unknown';
 }
 
+/**
+ * The marker playlist title for a machine key.
+ *
+ * @param {string} key - A key from {@link machineKey}.
+ * @returns {string} `gyp-sync-<key>`.
+ */
 export function markerTitle(key) {
   return `${MARKER_PREFIX}${key}`;
 }
 
-/** The key half of a marker title, for reporting which machine holds the claim. */
+/**
+ * The key half of a marker title, for reporting which machine holds the claim.
+ *
+ * @param {string} title - A marker playlist title.
+ * @returns {string} The text after the prefix, or `(unnamed)` when there is none.
+ */
 export function markerKeyOf(title) {
   return String(title || '').trim().slice(MARKER_PREFIX.length) || '(unnamed)';
 }
 
+/**
+ * Whether a playlist is a sync marker (case-insensitive prefix match).
+ *
+ * @param {?PlaylistRef} p - A playlist.
+ * @returns {boolean} True for any `gyp-sync-*` title.
+ */
 const isMarker = (p) => (p?.title || '').trim().toLowerCase().startsWith(MARKER_PREFIX);
 
 /**
@@ -58,6 +100,10 @@ const isMarker = (p) => (p?.title || '').trim().toLowerCase().startsWith(MARKER_
  * A foreign marker wins even when ours is also present: two markers means two
  * installations, whichever one we are. Matching is case-insensitive because YouTube
  * titles are, and `findPlaylistByTitle` already compares that way.
+ *
+ * @param {PlaylistRef[]} playlists - Every playlist on the account.
+ * @param {string} ourKey - This machine's key.
+ * @returns {MarkerClassification} The account's claim state.
  */
 export function classifyMarker(playlists, ourKey) {
   const ourTitle = markerTitle(ourKey).trim().toLowerCase();
@@ -83,6 +129,10 @@ export function classifyMarker(playlists, ourKey) {
  * stdin, not stdout, is the thing to test: running a wrapper by hand redirects stdout
  * into logs/sync.log while stdin stays a terminal, and refusing that would be refusing
  * a legitimate claim. Under launchd and Task Scheduler stdin is /dev/null or absent.
+ *
+ * @param {{claimSync: boolean}} opts - Parsed CLI options.
+ * @param {boolean} isTty - Whether stdin is a terminal.
+ * @returns {?string} The refusal message, or null to proceed.
  */
 export function checkClaimSync({ claimSync }, isTty) {
   if (!claimSync || isTty) return null;
@@ -100,6 +150,10 @@ export function checkClaimSync({ claimSync }, isTty) {
  * unattended claim flaps at 50 units a write; an unattended *unclaim* costs 100 a night
  * forever, because the very next run finds no marker and creates one again — release,
  * recreate, release — and each half of that loop looks entirely correct in the log.
+ *
+ * @param {{unclaimSync: boolean, unclaimAll: boolean}} opts - Parsed CLI options.
+ * @param {boolean} isTty - Whether stdin is a terminal.
+ * @returns {?string} The refusal message, or null to proceed.
  */
 export function checkUnclaimSync({ unclaimSync, unclaimAll }, isTty) {
   if ((!unclaimSync && !unclaimAll) || isTty) return null;
@@ -131,6 +185,14 @@ export function checkUnclaimSync({ unclaimSync, unclaimAll }, isTty) {
  *               and any second machine then reports a foreign one, exactly as before.
  *               Retiring hosts is what it is for; it is not a way to silence a conflict,
  *               which would come straight back.
+ *
+ * @param {PlaylistRef[]} playlists - Every playlist on the account.
+ * @param {string} ourKey - This machine's key.
+ * @param {object} [options]
+ * @param {boolean} [options.all=false] - Delete every marker, not only ours.
+ * @returns {{action: 'none', reason: string}
+ *   | {action: 'delete', targets: PlaylistRef[], remaining: PlaylistRef[]}} Either nothing
+ *   to do and why, or the markers to delete and the foreign ones deliberately left.
  */
 export function planUnclaim(playlists, ourKey, { all = false } = {}) {
   const found = classifyMarker(playlists, ourKey);
@@ -152,7 +214,12 @@ export function planUnclaim(playlists, ourKey, { all = false } = {}) {
   return { action: 'delete', targets, remaining: all ? [] : found.foreign };
 }
 
-/** One line naming the machines that hold a foreign claim. */
+/**
+ * One line naming the machines that hold a foreign claim.
+ *
+ * @param {MarkerClassification} classification - A `foreign` result from {@link classifyMarker}.
+ * @returns {string} The warning carried into the console, the report and the alert mail.
+ */
 export function conflictMessage(classification) {
   const keys = classification.foreign.map((p) => markerKeyOf(p.title));
   const who = keys.length === 1 ? `"${keys[0]}"` : keys.map((k) => `"${k}"`).join(', ');

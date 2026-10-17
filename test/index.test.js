@@ -1,3 +1,9 @@
+/**
+ * Tests for the basics of src/index.js's command-line parsing.
+ *
+ * @module test/index
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseArgs } from '../src/index.js';

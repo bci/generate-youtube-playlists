@@ -1,3 +1,11 @@
+/**
+ * Tests for the pure sync-marker rules in src/marker.js (machine keys, classification,
+ * the claim-needs-a-terminal check, the conflict message) and how a conflict reaches
+ * the report and the flags.
+ *
+ * @module test/marker
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -11,6 +19,12 @@ import {
 import { buildHtml } from '../src/report.js';
 import { parseArgs } from '../src/index.js';
 
+/**
+ * A playlist reference with an id derived from its title.
+ *
+ * @param {string} title - Playlist title.
+ * @returns {{id: string, title: string}} The playlist.
+ */
 const pl = (title) => ({ id: `id-${title}`, title });
 
 test('machineKey drops the domain, which is the half that churns', () => {

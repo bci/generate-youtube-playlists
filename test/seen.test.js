@@ -1,3 +1,10 @@
+/**
+ * Tests for the watched ledger in src/seen.js: what counts as watched, the two resets,
+ * file naming, and the on-disk round trip.
+ *
+ * @module test/seen
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs/promises';
@@ -11,7 +18,21 @@ import {
   updateLedger,
 } from '../src/seen.js';
 
+/**
+ * A set's members, sorted, for order-independent comparison.
+ *
+ * @param {Set<string>} set - Ids.
+ * @returns {string[]} Sorted ids.
+ */
 const ids = (set) => [...set].sort();
+/**
+ * Build a ledger.
+ *
+ * @param {?string} playlistId - Playlist id.
+ * @param {string[]} known - Known ids.
+ * @param {string[]} [seen=[]] - Watched ids.
+ * @returns {{playlistId: ?string, known: Set<string>, seen: Set<string>}} The ledger.
+ */
 const mk = (playlistId, known, seen = []) => ({
   playlistId,
   known: new Set(known),

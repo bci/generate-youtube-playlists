@@ -1,3 +1,12 @@
+/**
+ * Tests for the `after=` / `older=` channel settings: parsing (config line and the
+ * run-wide `--after=` / `--older=` flags), what falls in and out of scope, cutoff
+ * deletions, where inserts land below kept out-of-scope videos, and how the report
+ * and console describe a cutoff. Every YouTube call is a stub.
+ *
+ * @module test/after-date
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseChannelSpec, parseArgs, summaryLine } from '../src/index.js';
@@ -87,6 +96,11 @@ test('a bad --after= or --older= is fatal, not a warning', () => {
 /**
  * classifyShorts: false keeps the duration lookup and the Shorts URL probe (real
  * HTTP) out of these tests — the cutoff is what is under test, not the partition.
+ *
+ * @param {object} fixture
+ * @param {Array<[string, string]>} fixture.uploads - `[videoId, publishedAt]` pairs.
+ * @param {string[]} fixture.inPlaylist - Video ids already in the channel's playlist.
+ * @returns {object} A mock client that also exposes the `deleted` and `inserted` arrays.
  */
 function stubYouTube({ uploads, inPlaylist }) {
   const deleted = [];
@@ -144,15 +158,22 @@ function stubYouTube({ uploads, inPlaylist }) {
   };
 }
 
+/** The fixture channel's uploads, straddling the cutoff by one second. */
 const UPLOADS = [
   ['old1', '2019-05-01T00:00:00Z'],
   ['old2', '2025-12-31T23:59:59Z'], // one second short of the cutoff
   ['edge', '2026-01-01T00:00:00Z'], // exactly the cutoff — inclusive, so in scope
   ['new1', '2026-03-01T00:00:00Z'],
 ];
+/** `after=2026-01-01`, as parsed. */
 const CUTOFF = new Date('2026-01-01T00:00:00Z');
 
-/** One channel, one playlist, with the cutoff applied. Returns [status, client]. */
+/**
+ * One channel, one playlist, with the cutoff applied. Returns [status, client].
+ *
+ * @param {object} [over={}] - Overrides for the readChannel / getPlaylistStatus options.
+ * @returns {Promise<[object, object]>} The playlist status and the stub client.
+ */
 async function statusFor(over = {}) {
   const yt = stubYouTube({ uploads: UPLOADS, inPlaylist: ['old1', 'old2', 'edge'] });
   const opts = { after: CUTOFF, classifyShorts: false, ...over };

@@ -1,6 +1,34 @@
+/**
+ * The sync's heartbeat (`state/last-run.json`) and the pure staleness rule the
+ * watchdog applies to it.
+ *
+ * @module heartbeat
+ */
+
 import fs from 'fs/promises';
 import path from 'path';
 
+/**
+ * Summary of one finished sync run, as written to `state/last-run.json`.
+ *
+ * @typedef {object} Heartbeat
+ * @property {string} finishedAt - ISO 8601 timestamp of when the run finished.
+ * @property {number} channels - Number of playlist summaries in the run.
+ * @property {number} added - Videos inserted across all playlists.
+ * @property {number} removed - Videos deleted across all playlists.
+ * @property {number} errors - Playlists that ended in an error.
+ */
+
+/**
+ * Result of {@link checkStale}.
+ *
+ * @typedef {object} StaleCheck
+ * @property {boolean} stale - True when the watchdog should alert.
+ * @property {?number} ageHours - Hours since the last run, or null when unknown.
+ * @property {string} reason - One human-readable sentence (no trailing period).
+ */
+
+/** File name of the heartbeat inside the state directory. */
 export const HEARTBEAT_FILE = 'last-run.json';
 
 /**
@@ -8,6 +36,11 @@ export const HEARTBEAT_FILE = 'last-run.json';
  * logs/sync.log: a skipped run leaves no log line at all, which is exactly the case
  * that has to be detectable, and "no log line" is indistinguishable from a rotated
  * or truncated log.
+ *
+ * @param {string} stateDir - Directory to write into; created if missing.
+ * @param {Heartbeat} heartbeat - The run's totals. Only these five fields are written.
+ * @returns {Promise<void>}
+ * @throws {Error} When the directory or file cannot be written.
  */
 export async function writeHeartbeat(stateDir, { finishedAt, channels, added, removed, errors }) {
   await fs.mkdir(stateDir, { recursive: true });
@@ -15,6 +48,13 @@ export async function writeHeartbeat(stateDir, { finishedAt, channels, added, re
   await fs.writeFile(path.join(stateDir, HEARTBEAT_FILE), `${body}\n`);
 }
 
+/**
+ * Read the last heartbeat.
+ *
+ * @param {string} stateDir - Directory holding `last-run.json`.
+ * @returns {Promise<?Heartbeat>} The parsed heartbeat, or null when the file is missing
+ *   or unreadable — the watchdog treats both as stale.
+ */
 export async function readHeartbeat(stateDir) {
   try {
     return JSON.parse(await fs.readFile(path.join(stateDir, HEARTBEAT_FILE), 'utf8'));
@@ -29,6 +69,11 @@ export async function readHeartbeat(stateDir) {
  *
  * `maxAgeHours` defaults to 36: a daily task has to miss its slot AND the following
  * one before this fires, so a single late or manually-deferred run stays silent.
+ *
+ * @param {?Heartbeat} heartbeat - What {@link readHeartbeat} returned.
+ * @param {Date} now - The current time, passed in so tests need no clock.
+ * @param {number} [maxAgeHours=36] - Age beyond which the sync counts as quiet.
+ * @returns {StaleCheck} Whether to alert, and why.
  */
 export function checkStale(heartbeat, now, maxAgeHours = 36) {
   if (!heartbeat?.finishedAt) {
@@ -49,7 +94,16 @@ export function checkStale(heartbeat, now, maxAgeHours = 36) {
   return { stale: false, ageHours, reason: `last successful run was ${ageHours.toFixed(1)}h ago` };
 }
 
-/** Plain-text-ish HTML for the alert. Deliberately short: it is read on a phone. */
+/**
+ * Plain-text-ish HTML for the alert. Deliberately short: it is read on a phone.
+ *
+ * @param {?Heartbeat} heartbeat - The last heartbeat, or null when there has never been one.
+ * @param {StaleCheck} check - The verdict from {@link checkStale}; its reason is the headline.
+ * @param {object} [options]
+ * @param {string} [options.taskName='YouTube Playlist Sync'] - Scheduled-task name to
+ *   tell the reader to inspect.
+ * @returns {string} A complete HTML document.
+ */
 export function buildAlertHtml(heartbeat, check, { taskName = 'YouTube Playlist Sync' } = {}) {
   const last = heartbeat?.finishedAt
     ? `${heartbeat.finishedAt} (${heartbeat.channels ?? '?'} channels, ` +

@@ -1,12 +1,24 @@
-// Send the report via the Microsoft 365 Graph API using the client-credentials
-// (application) flow. Requires an app registration with the Mail.Send application
-// permission + admin consent. Credentials come from environment variables
-// (see .env): MS365_TENANT_ID, MS365_CLIENT_ID, MS365_CLIENT_SECRET, MS365_FROM_ADDRESS.
+/**
+ * Mail sender for the run report and the watchdog alert.
+ *
+ * Send the report via the Microsoft 365 Graph API using the client-credentials
+ * (application) flow. Requires an app registration with the Mail.Send application
+ * permission + admin consent. Credentials come from environment variables
+ * (see .env): MS365_TENANT_ID, MS365_CLIENT_ID, MS365_CLIENT_SECRET, MS365_FROM_ADDRESS.
+ *
+ * Uses the platform `fetch`; no mail library is involved.
+ *
+ * @module email
+ */
 
 /**
  * Acquire a Microsoft Graph access token via the client-credentials flow.
  * Reads MS365_TENANT_ID / MS365_CLIENT_ID / MS365_CLIENT_SECRET from the environment.
  * Throws with a clear message if creds are missing or rejected.
+ *
+ * @returns {Promise<string>} A bearer token for `https://graph.microsoft.com/.default`.
+ * @throws {Error} When any of the three variables is missing (all missing names are
+ *   listed), or when the token endpoint rejects the request.
  */
 export async function getGraphToken() {
   const tenantId = process.env.MS365_TENANT_ID;
@@ -44,6 +56,17 @@ export async function getGraphToken() {
 /**
  * Send an HTML report email via Microsoft Graph.
  * Reads credentials from process.env. Returns the "from" address on success.
+ *
+ * The message is saved to the sender's Sent Items, so there is a record of every report
+ * that left the machine.
+ *
+ * @param {object} message - What to send.
+ * @param {string|string[]} message.to - One recipient address or several.
+ * @param {string} message.subject - Subject line.
+ * @param {string} message.html - Complete HTML document used as the body.
+ * @returns {Promise<string>} The MS365_FROM_ADDRESS the mail was sent from.
+ * @throws {Error} When MS365_FROM_ADDRESS is missing, when a token cannot be acquired
+ *   (see {@link getGraphToken}), or when Graph refuses the sendMail call.
  */
 export async function sendReport({ to, subject, html }) {
   const from = process.env.MS365_FROM_ADDRESS;

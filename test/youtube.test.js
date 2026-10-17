@@ -1,3 +1,11 @@
+/**
+ * Tests for src/youtube.js helpers and applyInserts: durations, error classification,
+ * URLs, chronological positional inserts, quota stops, ceilings, playlist creation and
+ * the append fallback when a playlist is not on manual sorting.
+ *
+ * @module test/youtube
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -32,6 +40,14 @@ test('playlistUrl builds a playlist URL', () => {
 
 // ---- applyInserts (core insert logic) with a mock YouTube client ----
 
+/**
+ * A client that records inserted snippets.
+ *
+ * @param {object} [options]
+ * @param {number} [options.quotaAfter=Infinity] - Fail with quotaExceeded after this
+ *   many inserts.
+ * @returns {object} A mock client exposing the `inserts` array.
+ */
 function mockYoutube({ quotaAfter = Infinity } = {}) {
   const inserts = [];
   let count = 0;
@@ -55,6 +71,11 @@ function mockYoutube({ quotaAfter = Infinity } = {}) {
   };
 }
 
+/**
+ * A status for a five-video channel whose playlist is missing videos `c` and `e`.
+ *
+ * @returns {object} A minimal status object for applyInserts.
+ */
 function makeStatus() {
   const uploads = ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({
     videoId: id,
@@ -157,6 +178,11 @@ test('isManualSortError spots a refused positional insert', () => {
 
 // Rejects any insert carrying a position, exactly as YouTube does once the playlist
 // is sorted by anything other than "Manual".
+/**
+ * A client whose playlist is not on manual sorting.
+ *
+ * @returns {object} A mock client exposing `inserts` and `refusedCount()`.
+ */
 function mockUnsortedYoutube() {
   const inserts = [];
   let refused = 0;

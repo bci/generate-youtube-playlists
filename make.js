@@ -15,6 +15,11 @@
  *
  * This file is tooling and imports nothing from src/ at load time - see targets() for
  * why the two places that need src/ import it lazily.
+ *
+ * (That pointer predates the current layout: the lazy imports are channelParser(),
+ * verifyGoogleCredentials(), heartbeatLine() and the list-channels target.)
+ *
+ * @module make
  */
 
 import { spawnSync } from 'child_process';
@@ -24,22 +29,37 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 // checks.js is deliberately NOT imported here - see loadChecks() below.
 
+/** Repository root (this file lives there). */
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+/** Running on Windows (Task Scheduler, PowerShell). */
 const IS_WINDOWS = process.platform === 'win32';
+/** Running on macOS (launchd, sudo). */
 const IS_MACOS = process.platform === 'darwin';
 
+/** The local channel list. */
 const CHANNELS = path.join(ROOT, 'config', 'channels.txt');
+/** The tracked channel-list template. */
 const CHANNELS_TEMPLATE = path.join(ROOT, 'config', 'channels.example.txt');
+/** The local credentials and settings file. */
 const ENV_FILE = path.join(ROOT, '.env');
+/** The tracked .env template. */
 const ENV_TEMPLATE = path.join(ROOT, '.env.example');
+/** Watched ledgers and the heartbeat; never deleted by any target. */
 const STATE_DIR = path.join(ROOT, 'state');
+/** Wrapper logs. */
 const LOG_DIR = path.join(ROOT, 'logs');
+/** The last run's HTML report. */
 const REPORT = path.join(ROOT, 'report.html');
+/** The release history `release` edits. */
 const VERSIONS_MD = path.join(ROOT, 'VERSIONS.md');
+/** The feature manifest `release` edits. */
 const FEATURES_YAML = path.join(ROOT, 'features.yaml');
-// The release kit's archive name. Spelled out rather than taken from package.json's `name`,
-// because it is what someone downloads and unzips on a machine that knows nothing about npm.
+/**
+ * The release kit's archive name. Spelled out rather than taken from package.json's `name`,
+ * because it is what someone downloads and unzips on a machine that knows nothing about npm.
+ */
 const KIT_NAME = 'youtube-playlists';
+/** Where macOS LaunchDaemon plists are installed. */
 const DAEMON_DIR = '/Library/LaunchDaemons';
 
 /**
@@ -76,6 +96,13 @@ export const CLEAN_PATHS = ['logs', 'report.html'];
 
 /** A failure with a message worth printing on its own, rather than a stack trace. */
 class Fail extends Error {}
+/**
+ * Stop the current target with a message for the user.
+ *
+ * @param {string} message - What went wrong and, ideally, what to do.
+ * @returns {never}
+ * @throws {Fail} Always.
+ */
 function fail(message) {
   throw new Fail(message);
 }
@@ -88,6 +115,10 @@ function fail(message) {
  * exists for. It runs `npm install --omit=dev`, so a static import left a release kit
  * unable to run the one target that sets it up: make.js failed to parse before any target
  * was even chosen, with a module-resolution stack rather than anything actionable.
+ *
+ * @returns {Promise<typeof import('./checks.js')>} The checks module.
+ * @throws {Fail} When a dev dependency is missing (with instructions).
+ * @throws {Error} Any other import failure.
  */
 async function loadChecks() {
   try {
@@ -114,6 +145,14 @@ async function loadChecks() {
  * Run a command with the terminal attached, echoing it first. The echo is not decoration:
  * several targets invoke `sudo`, and seeing the exact command before being asked for a
  * password is what makes it reviewable rather than something to approve blind.
+ *
+ * @param {string} cmd - Executable.
+ * @param {string[]} [args=[]] - Arguments (no shell is involved).
+ * @param {object} [options]
+ * @param {boolean} [options.check=true] - Fail on a non-zero exit.
+ * @param {string} [options.cwd=ROOT] - Working directory.
+ * @returns {number} The exit status (1 when the process was killed by a signal).
+ * @throws {Fail} When the command cannot start, or exits non-zero with `check` on.
  */
 function run(cmd, args = [], { check = true, cwd = ROOT } = {}) {
   console.log(`\n$ ${[cmd, ...args].join(' ')}`);
@@ -123,7 +162,14 @@ function run(cmd, args = [], { check = true, cwd = ROOT } = {}) {
   return r.status ?? 1;
 }
 
-/** Same, but capture the output instead of showing it. For probing, never for work. */
+/**
+ * Same, but capture the output instead of showing it. For probing, never for work.
+ *
+ * @param {string} cmd - Executable.
+ * @param {string[]} [args=[]] - Arguments.
+ * @returns {{status: ?number, out: string, error: (Error|undefined)}} Exit status,
+ *   stdout and stderr joined and trimmed, and the spawn error if it could not start.
+ */
 function capture(cmd, args = []) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8' });
   return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}`.trim(), error: r.error };
@@ -133,6 +179,10 @@ function capture(cmd, args = []) {
  * Run the tool itself. process.execPath rather than "node" for the same reason the
  * launchd wrappers resolve node by hand: it is the interpreter already running, so it
  * cannot be a different or missing one.
+ *
+ * @param {string[]} args - Script path and its arguments.
+ * @returns {number} The exit status.
+ * @throws {Fail} When node exits non-zero.
  */
 function node(args) {
   return run(process.execPath, args);
@@ -145,6 +195,10 @@ function node(args) {
  * shell:true on Windows because Node >= 18.20 refuses to spawn a .cmd (npm's Windows
  * entry point) without it; the arguments here are fixed strings, so nothing is
  * interpolated into that shell.
+ *
+ * @param {string} script - An npm script name (or `install`).
+ * @returns {number} 0 on success.
+ * @throws {Fail} When npm cannot start or exits non-zero.
  */
 function npmScript(script) {
   if (!IS_WINDOWS) return run('npm', ['run', script]);
@@ -157,11 +211,24 @@ function npmScript(script) {
   return 0;
 }
 
-/** Quote a string for a PowerShell single-quoted literal. */
+/**
+ * Quote a string for a PowerShell single-quoted literal.
+ *
+ * @param {*} s - Value to quote (stringified first).
+ * @returns {string} `'...'` with embedded single quotes doubled.
+ */
 function psQuote(s) {
   return `'${String(s).replace(/'/g, "''")}'`;
 }
 
+/**
+ * Run a PowerShell command line (Windows), without the user's profile and with the
+ * execution policy bypassed for this one call.
+ *
+ * @param {string} script - The command text; quote values with {@link psQuote}.
+ * @returns {number} The exit status.
+ * @throws {Fail} When PowerShell cannot start or exits non-zero.
+ */
 function powershell(script) {
   return run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
 }
@@ -181,6 +248,9 @@ function powershell(script) {
  * command line: make claims those for itself. Two of them fail silently and both are
  * safety flags, which is why this is a supported spelling rather than a convenience -
  * see guardMakeAteFlags() below.
+ *
+ * @param {string[]} words - Words after the target name.
+ * @returns {string[]} The same words, with `key=value` turned into `--key=value`.
  */
 export function toCliArgs(words) {
   return words.map((w) => (/^[A-Za-z][A-Za-z0-9-]*=/.test(w) ? `--${w}` : w));
@@ -197,6 +267,9 @@ export function toCliArgs(words) {
  *
  * The Makefile marks the recipe with `+` so it still runs under -n; this is what it
  * runs for, turning a plausible-looking no-op into an error that names the fix.
+ *
+ * @param {?string} makeflags - The MAKEFLAGS environment variable.
+ * @returns {string[]} A description of each tool flag make swallowed; empty when none.
  */
 export function eatenMakeFlags(makeflags) {
   const letters = String(makeflags || '').trim().split(/\s+/)[0] || '';
@@ -207,6 +280,13 @@ export function eatenMakeFlags(makeflags) {
   ];
 }
 
+/**
+ * Fail when MAKEFLAGS shows make swallowed `--dry-run` or `--max`; see
+ * {@link eatenMakeFlags}.
+ *
+ * @returns {void}
+ * @throws {Fail} When a flag was swallowed.
+ */
 function guardMakeAteFlags() {
   const eaten = eatenMakeFlags(process.env.MAKEFLAGS);
   if (!eaten.length) return;
@@ -221,18 +301,42 @@ function guardMakeAteFlags() {
 // Small filesystem helpers
 // ---------------------------------------------------------------------------------
 
+/**
+ * Whether a path exists.
+ *
+ * @param {string} p - Absolute path.
+ * @returns {boolean} True when it exists.
+ */
 const exists = (p) => fs.existsSync(p);
+/**
+ * A path relative to the repository root, for messages.
+ *
+ * @param {string} p - Absolute path.
+ * @returns {string} The relative path, or `.` for the root itself.
+ */
 const rel = (p) => path.relative(ROOT, p) || '.';
 
 /**
  * The line ending a file already uses. AGENTS.md: the working tree is deliberately
  * mixed and git normalizes on checkout, so rewriting a file's endings as a side effect
  * turns a one-line change into a whole-file diff.
+ *
+ * @param {string} content - File text.
+ * @returns {string} `\r\n` when the file contains any CRLF, else `\n`.
  */
 function eolOf(content) {
   return content.includes('\r\n') ? '\r\n' : '\n';
 }
 
+/**
+ * Copy a template into place unless the target already exists.
+ *
+ * @param {string} from - Template path.
+ * @param {string} to - Destination path.
+ * @param {string} what - What the user should do with the new file, for the message.
+ * @returns {string} One line saying what happened.
+ * @throws {Fail} When the template is missing.
+ */
 function copyIfMissing(from, to, what) {
   if (exists(to)) return `${rel(to)} already exists, left alone`;
   if (!exists(from)) fail(`missing template ${rel(from)}`);
@@ -250,12 +354,20 @@ function copyIfMissing(from, to, what) {
  * so the two targets that genuinely need the project's own parser import it lazily.
  * Reusing parseChannelSpec is the point: add-channel validates a line with exactly the
  * code that will read it at 3 AM, rather than a second, subtly different parser.
+ *
+ * @returns {Promise<(line: string) => object>} src/index.js's parseChannelSpec.
  */
 async function channelParser() {
   const mod = await import(pathToFileURL(path.join(ROOT, 'src', 'index.js')).href);
   return mod.parseChannelSpec;
 }
 
+/**
+ * Read config/channels.txt.
+ *
+ * @returns {string} Its text.
+ * @throws {Fail} When it does not exist yet (with the setup command to run).
+ */
 function readChannels() {
   if (!exists(CHANNELS)) {
     fail(`no ${rel(CHANNELS)} yet - run \`${invocation()} setup\` first`);
@@ -263,14 +375,24 @@ function readChannels() {
   return fs.readFileSync(CHANNELS, 'utf8');
 }
 
-/** The handle a channel line names, lowercased and without its @, or null for a comment. */
+/**
+ * The handle a channel line names, lowercased and without its @, or null for a comment.
+ *
+ * @param {string} line - One line of the channel list.
+ * @returns {?string} The handle, or null for a blank or `#` line.
+ */
 export function handleOf(line) {
   const t = String(line).trim();
   if (!t || t.startsWith('#')) return null;
   return t.split(/\s+/)[0].replace(/^@/, '').toLowerCase();
 }
 
-/** Every channel line in the file, in order, with its 1-based line number. */
+/**
+ * Every channel line in the file, in order, with its 1-based line number.
+ *
+ * @param {string} content - channels.txt text.
+ * @returns {Array<{text: string, lineNo: number, handle: string}>} Non-comment lines only.
+ */
 export function channelLines(content) {
   return content
     .split(/\r?\n/)
@@ -282,6 +404,11 @@ export function channelLines(content) {
  * Drop every line naming `handle`. Returns the new content and what was removed, so the
  * caller can print the removed line verbatim: the settings on it (`after=`, a custom
  * `shorts-title=`) are not recoverable from anywhere else once the line is gone.
+ *
+ * @param {string} content - channels.txt text.
+ * @param {string} handle - Handle to drop, with or without `@` (case-insensitive).
+ * @returns {{content: string, removed: string[]}} The new text, in the file's own line
+ *   ending, and the trimmed lines removed.
  */
 export function removeChannel(content, handle) {
   const want = String(handle).replace(/^@/, '').toLowerCase();
@@ -307,6 +434,11 @@ export function removeChannel(content, handle) {
  * looks: .env is the only copy of the OAuth refresh token on this machine, and a helper
  * that regenerated the file from parsed key/value pairs would quietly drop the comments
  * that say what each key is for.
+ *
+ * @param {string} content - .env text.
+ * @param {string} key - Variable name; used in a regular expression, so plain identifiers only.
+ * @param {string} value - Value to store.
+ * @returns {string} The new .env text.
  */
 export function setEnvValue(content, key, value) {
   const eol = eolOf(content);
@@ -316,7 +448,14 @@ export function setEnvValue(content, key, value) {
   return `${body}${key}=${value}${eol}`;
 }
 
-/** Read one key out of a .env file without loading the rest into this process. */
+/**
+ * Read one key out of a .env file without loading the rest into this process.
+ *
+ * @param {string} content - .env text.
+ * @param {string} key - Variable name.
+ * @returns {?string} The value with one layer of surrounding quotes removed, or null
+ *   when the key is absent.
+ */
 export function getEnvValue(content, key) {
   const m = new RegExp(`^\\s*${key}\\s*=\\s*(.*)$`, 'm').exec(String(content));
   return m ? m[1].trim().replace(/^["']|["']$/g, '') : null;
@@ -327,6 +466,9 @@ export function getEnvValue(content, key) {
  * not an RFC validator and does not try to be: the real test is whether mail arrives,
  * and the failure worth catching here is a typo like a missing @ that would otherwise
  * surface as a Graph error at 3 AM in a log nobody reads.
+ *
+ * @param {string} address - Candidate address.
+ * @returns {boolean} True for the shape `name@example.com`, with no whitespace.
  */
 export function validEmail(address) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(address).trim());
@@ -346,6 +488,10 @@ export function validEmail(address) {
  * wherever the shell allows it. It is simply not what the docs teach - and the tolerance is
  * narrower than "HH:MM" suggests: `4:30` and `430` are both rejected, so a time is always
  * four digits whether or not it carries a colon.
+ *
+ * @param {string} text - `HHMM` or `HH:MM`.
+ * @returns {{hour: number, minute: number}} The parsed time.
+ * @throws {Fail} When it is not a valid four-digit 24-hour time.
  */
 export function parseClock(text) {
   const m = /^([01]\d|2[0-3]):?([0-5]\d)$/.exec(String(text).trim());
@@ -355,6 +501,12 @@ export function parseClock(text) {
   return { hour: Number(m[1]), minute: Number(m[2]) };
 }
 
+/**
+ * Format a time as `HH:MM`, the form .env and the schedulers use.
+ *
+ * @param {{hour: number, minute: number}} time - The time.
+ * @returns {string} Zero-padded `HH:MM`.
+ */
 const clockString = ({ hour, minute }) => `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 
 /**
@@ -364,6 +516,9 @@ const clockString = ({ hour, minute }) => `${String(hour).padStart(2, '0')}:${St
  * makes it silent in exactly the case it exists to catch, and the gap also lets a slow or
  * retrying sync finish before its heartbeat is judged. So moving the sync moves the
  * watchdog with it rather than leaving the two to collide.
+ *
+ * @param {{hour: number, minute: number}} time - The sync's time.
+ * @returns {{hour: number, minute: number}} Six hours later, wrapping past midnight.
  */
 export function watchdogTime({ hour, minute }) {
   return { hour: (hour + 6) % 24, minute };
@@ -376,6 +531,10 @@ export function watchdogTime({ hour, minute }) {
  * because the README documents installing them by hand with `sed` on the two placeholders
  * that exist. A third would leave that documented path producing a plist with a literal
  * __SYNC_HOUR__ in it, which launchd rejects while complaining about the file.
+ *
+ * @param {string} xml - Plist text.
+ * @param {{hour: number, minute: number}} time - New run time.
+ * @returns {string} The plist with Hour and Minute inside StartCalendarInterval replaced.
  */
 export function setPlistTime(xml, { hour, minute }) {
   return xml.replace(
@@ -389,7 +548,13 @@ export function setPlistTime(xml, { hour, minute }) {
   );
 }
 
-/** The configured run times, falling back to the defaults the templates carry. */
+/**
+ * The configured run times, falling back to the defaults the templates carry.
+ *
+ * @returns {{sync: {hour: number, minute: number}, watchdog: {hour: number, minute: number}}}
+ *   SYNC_AT / WATCHDOG_AT from .env; 03:00 and six hours later by default.
+ * @throws {Fail} When a configured time is malformed.
+ */
 function scheduleTimes() {
   const env = exists(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf8') : '';
   const sync = getEnvValue(env, 'SYNC_AT');
@@ -402,6 +567,13 @@ function scheduleTimes() {
 // Scheduled jobs
 // ---------------------------------------------------------------------------------
 
+/**
+ * Fail on a platform with neither launchd nor Task Scheduler.
+ *
+ * @param {string} action - Target name, for the message.
+ * @returns {void}
+ * @throws {Fail} On anything but macOS or Windows.
+ */
 function requireKnownPlatform(action) {
   if (!IS_MACOS && !IS_WINDOWS) {
     fail(
@@ -419,6 +591,10 @@ function requireKnownPlatform(action) {
  * no marker of its own and creates one, at 50 units, and the machine you were handing
  * over to finds the account claimed again. The order that works is uninstall, then
  * unclaim - so this names it rather than letting the sequence look like it worked.
+ *
+ * @param {string} action - Target name, for the message.
+ * @returns {void}
+ * @throws {Fail} When the nightly sync job is installed.
  */
 function requireNotScheduled(action) {
   const installed = IS_MACOS
@@ -437,11 +613,23 @@ function requireNotScheduled(action) {
   );
 }
 
-/** Fill a launchd plist template. The placeholders are the two the templates document. */
+/**
+ * Fill a launchd plist template. The placeholders are the two the templates document.
+ *
+ * @param {string} template - Plist template text.
+ * @param {{repoDir: string, user: string}} values - Repository path and the account to run as.
+ * @returns {string} The plist with `__REPO_DIR__` and `__RUN_AS_USER__` replaced.
+ */
 export function renderPlist(template, { repoDir, user }) {
   return template.replace(/__REPO_DIR__/g, repoDir).replace(/__RUN_AS_USER__/g, user);
 }
 
+/**
+ * Install (or reinstall) both LaunchDaemons via sudo, at the configured times.
+ *
+ * @returns {void}
+ * @throws {Fail} When a wrapper is missing or a sudo step fails.
+ */
 function installMac() {
   const user = os.userInfo().username;
   const times = scheduleTimes();
@@ -479,6 +667,12 @@ function installMac() {
   console.log('  sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00   # if it sleeps');
 }
 
+/**
+ * Register (or re-register) both scheduled tasks, at the configured times.
+ *
+ * @returns {void}
+ * @throws {Fail} When PowerShell fails.
+ */
 function installWindows() {
   const times = scheduleTimes();
   // -LogonType S4U is the load-bearing part: a task registered to run only when the user
@@ -503,6 +697,12 @@ function installWindows() {
   console.log('The machine has to be awake at 3 AM; the task can wake it, not power it on.');
 }
 
+/**
+ * Unload and delete both LaunchDaemons via sudo. state/ and logs/ are left alone.
+ *
+ * @returns {void}
+ * @throws {Fail} When deleting a plist fails.
+ */
 function uninstallMac() {
   for (const job of Object.values(JOBS)) {
     run('sudo', ['launchctl', 'bootout', `system/${job.label}`], { check: false });
@@ -511,6 +711,12 @@ function uninstallMac() {
   console.log('\nBoth daemons removed. state/ and logs/ are untouched.');
 }
 
+/**
+ * Unregister both scheduled tasks. state\ and logs\ are left alone.
+ *
+ * @returns {void}
+ * @throws {Fail} When PowerShell fails.
+ */
 function uninstallWindows() {
   for (const job of Object.values(JOBS)) {
     powershell(
@@ -528,19 +734,29 @@ function uninstallWindows() {
 // One entry per target: { name, args, summary, run }. `help` is rendered from this
 // list, so a target that exists is a target that is documented.
 
-/** How this tool is invoked on the platform running it, for help text and messages. */
+/**
+ * How this tool is invoked on the platform running it, for help text and messages.
+ *
+ * @param {string} [platform=process.platform] - A `process.platform` value.
+ * @returns {string} `.\build.ps1` on Windows, `make` elsewhere.
+ */
 export function invocation(platform = process.platform) {
   return platform === 'win32' ? '.\\build.ps1' : 'make';
 }
 
 /** Credentials the tool cannot run without, and the ones only email needs. */
+/** Google credentials a sync cannot run without. */
 const REQUIRED_ENV = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'];
+/** Variables only the report email needs. */
 const EMAIL_ENV = ['MS365_TENANT_ID', 'MS365_CLIENT_ID', 'MS365_CLIENT_SECRET', 'MS365_FROM_ADDRESS', 'REPORT_TO'];
 
 /**
  * Which keys in a .env file have a non-empty value. Names only - this repo is public
  * (CLAUDE.md section 12) and doctor's output is the kind of thing that gets pasted into
  * an issue, so no value ever leaves this function.
+ *
+ * @param {string} content - .env text.
+ * @returns {Set<string>} Names of keys with a non-empty (unquoted) value.
  */
 export function envKeysSet(content) {
   const set = new Set();
@@ -553,6 +769,9 @@ export function envKeysSet(content) {
 
 /**
  * Key -> value from a .env-style file. envKeysSet's sibling, keeping the values.
+ *
+ * @param {string} content - .env text.
+ * @returns {Map<string, string>} Every key, with one layer of surrounding quotes removed.
  */
 export function envValues(content) {
   const out = new Map();
@@ -574,6 +793,11 @@ export function envValues(content) {
  * so every variable is non-empty from the moment the file exists. Checking that a value
  * is set therefore proves nothing at all on a fresh machine - which is exactly the machine
  * about to be handed a 3 AM scheduled task.
+ *
+ * @param {string} envText - .env text.
+ * @param {string} exampleText - .env.example text.
+ * @param {string[]} keys - Keys to test.
+ * @returns {string[]} The keys whose non-empty value equals the template's.
  */
 export function placeholderKeys(envText, exampleText, keys) {
   const env = envValues(envText);
@@ -587,6 +811,9 @@ export function placeholderKeys(envText, exampleText, keys) {
 /**
  * Turn an OAuth failure into something worth acting on. The raw errors name a field in a
  * JSON body, which does not tell someone standing at a new machine what to do next.
+ *
+ * @param {*} err - Error from the OAuth token exchange.
+ * @returns {string} An actionable reason, or the raw message when none matches.
  */
 export function oauthReason(err) {
   const msg = String(err?.response?.data?.error_description || err?.response?.data?.error || err?.message || err);
@@ -611,6 +838,8 @@ export function oauthReason(err) {
  * before every install. It is also the strongest check available without spending quota:
  * it proves the client id, the secret and the refresh token are a working set, not merely
  * three non-empty strings.
+ *
+ * @returns {Promise<{ok: true} | {ok: false, reason: string}>} Whether the exchange worked.
  */
 async function verifyGoogleCredentials() {
   try {
@@ -640,6 +869,10 @@ async function verifyGoogleCredentials() {
  *
  * Email credentials deliberately do NOT gate: without them the run still does its work and
  * writes report.html, so a missing mailbox is a degraded feature and not a dead job.
+ *
+ * @returns {Promise<void>}
+ * @throws {Fail} When .env is missing, a Google key is unset or still the placeholder,
+ *   or the token exchange fails.
  */
 async function requireRealGoogleCredentials() {
   if (!exists(ENV_FILE)) {
@@ -688,6 +921,10 @@ async function requireRealGoogleCredentials() {
  * file is valid, parses cleanly and syncs nothing at all. A scheduled task on top of it
  * runs every night, succeeds, reports zero channels and looks entirely healthy - and the
  * watchdog stays quiet, because the sync really did finish.
+ *
+ * @returns {Promise<void>}
+ * @throws {Fail} When channels.txt is missing, has no channel lines, or has a line the
+ *   tool's own parser rejects.
  */
 async function requireAtLeastOneChannel() {
   if (!exists(CHANNELS)) {
@@ -718,7 +955,13 @@ async function requireAtLeastOneChannel() {
   console.log(`  ${lines.length} channel${lines.length === 1 ? '' : 's'} configured.`);
 }
 
-/** Node's own version against the floor in package.json engines. */
+/**
+ * Node's own version against the floor in package.json engines.
+ *
+ * @param {string} current - Running version, e.g. `v20.12.0`.
+ * @param {string} required - The engines range, e.g. `>=20.12.0` (only the number is read).
+ * @returns {boolean} True when `current` is at or above the floor.
+ */
 export function meetsEngine(current, required) {
   const want = String(required).replace(/^[^\d]*/, '').split('.').map(Number);
   const have = String(current).replace(/^v/, '').split('.').map(Number);
@@ -729,16 +972,52 @@ export function meetsEngine(current, required) {
   return true;
 }
 
+/**
+ * One `doctor` result line.
+ *
+ * @typedef {object} DoctorCheck
+ * @property {'ok'|'warn'|'bad'} level - `bad` fails doctor.
+ * @property {string} label - What was checked.
+ * @property {string} detail - What was found.
+ */
+
+/**
+ * A passing doctor line.
+ *
+ * @param {string} label - What was checked.
+ * @param {string} detail - What was found.
+ * @returns {DoctorCheck} Level `ok`.
+ */
 function ok(label, detail) {
   return { level: 'ok', label, detail };
 }
+/**
+ * A doctor line worth reading that does not fail.
+ *
+ * @param {string} label - What was checked.
+ * @param {string} detail - What was found.
+ * @returns {DoctorCheck} Level `warn`.
+ */
 function warn(label, detail) {
   return { level: 'warn', label, detail };
 }
+/**
+ * A failing doctor line.
+ *
+ * @param {string} label - What was checked.
+ * @param {string} detail - What was found.
+ * @returns {DoctorCheck} Level `bad`.
+ */
 function bad(label, detail) {
   return { level: 'bad', label, detail };
 }
 
+/**
+ * Everything `doctor` checks: Node, dependencies, .env (including a live, quota-free
+ * token exchange), the channel list, the ledger directory and the git hook.
+ *
+ * @returns {Promise<DoctorCheck[]>} One line per check, in display order.
+ */
 async function doctorChecks() {
   const checks = [];
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -847,7 +1126,11 @@ async function doctorChecks() {
   return checks;
 }
 
-/** The heartbeat, read the way the watchdog reads it. */
+/**
+ * The heartbeat, read the way the watchdog reads it.
+ *
+ * @returns {Promise<string>} `ok: ...` or `STALE: ...`, with the last run's counts.
+ */
 async function heartbeatLine() {
   const mod = await import(pathToFileURL(path.join(ROOT, 'src', 'heartbeat.js')).href);
   const hb = await mod.readHeartbeat(STATE_DIR);
@@ -856,6 +1139,11 @@ async function heartbeatLine() {
   return `${check.stale ? 'STALE' : 'ok'}: ${check.reason}${counts}`;
 }
 
+/**
+ * Whether each LaunchDaemon is installed, and at what time. No sudo.
+ *
+ * @returns {string[]} Lines to print.
+ */
 function jobStatusMac() {
   const lines = [];
   for (const [key, job] of Object.entries(JOBS)) {
@@ -871,6 +1159,11 @@ function jobStatusMac() {
   return lines;
 }
 
+/**
+ * Last run, result and missed runs for each scheduled task.
+ *
+ * @returns {string[]} Lines to print.
+ */
 function jobStatusWindows() {
   const lines = [];
   for (const [key, job] of Object.entries(JOBS)) {
@@ -886,6 +1179,31 @@ function jobStatusWindows() {
   return lines;
 }
 
+/**
+ * One make target.
+ *
+ * @typedef {object} Target
+ * @property {string} name - What follows `make` / `.\build.ps1`.
+ * @property {string} [args] - Argument synopsis for help; must contain no `:` or `--`.
+ * @property {string} summary - One line for help and the shim lists.
+ * @property {(words: string[]) => (void|number|Promise<void>)} run - Does the work, given
+ *   the words after the target name. Fails by throwing {@link Fail}.
+ */
+
+/**
+ * A titled group of targets, as help prints them.
+ *
+ * @typedef {object} TargetGroup
+ * @property {string} title - Group heading.
+ * @property {Target[]} items - Targets in display order.
+ */
+
+/**
+ * The target registry: every target, grouped and ordered as help prints them. Built on
+ * each call so `summary` can reflect the platform.
+ *
+ * @returns {TargetGroup[]} Every group.
+ */
 export function targetGroups() {
   return [
     {
@@ -894,6 +1212,12 @@ export function targetGroups() {
         {
           name: 'setup',
           summary: 'install dependencies, enable the pre-push hook, create .env and channels.txt',
+          /**
+           * The `setup` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             npmScript('install');
             // The hook is opt-in per clone by design (git will not honour a hooks
@@ -913,6 +1237,12 @@ export function targetGroups() {
         {
           name: 'authorize',
           summary: 'one-time Google OAuth in a browser; writes GOOGLE_REFRESH_TOKEN to .env',
+          /**
+           * The `authorize` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             node([path.join('src', 'authorize.js')]);
           },
@@ -921,6 +1251,13 @@ export function targetGroups() {
           name: 'change-email',
           args: '<address>',
           summary: 'set REPORT_TO in .env - who receives the run report',
+          /**
+           * The `change-email` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             const [address, ...rest] = words;
             if (!address) fail('change-email needs an address, e.g. change-email you@example.com');
@@ -947,6 +1284,12 @@ export function targetGroups() {
         {
           name: 'doctor',
           summary: 'check this checkout can run at all: node, credentials, channel list, hooks',
+          /**
+           * The `doctor` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             const checks = await doctorChecks();
             const mark = { ok: 'ok  ', warn: 'warn', bad: 'FAIL' };
@@ -968,6 +1311,13 @@ export function targetGroups() {
           name: 'dry-run',
           args: '[channel] [key=value...]',
           summary: 'read everything, write nothing - always the first thing to run',
+          /**
+           * The `dry-run` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             node([path.join('src', 'index.js'), '--dry-run', ...toCliArgs(words)]);
           },
@@ -976,6 +1326,13 @@ export function targetGroups() {
           name: 'run',
           args: '[channel] [key=value...]',
           summary: 'sync for real: every channel in config/channels.txt, or just the one named',
+          /**
+           * The `run` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             node([path.join('src', 'index.js'), ...toCliArgs(words)]);
           },
@@ -983,6 +1340,13 @@ export function targetGroups() {
         {
           name: 'nightly',
           summary: 'exactly what the scheduled job runs (--email-on-change), by hand',
+          /**
+           * The `nightly` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             node([path.join('src', 'index.js'), '--email-on-change', ...toCliArgs(words)]);
           },
@@ -990,6 +1354,13 @@ export function targetGroups() {
         {
           name: 'watchdog',
           summary: 'staleness check; emails ERROR_ALERT_TO if no sync has finished in 36h',
+          /**
+           * The `watchdog` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             node([path.join('src', 'watchdog.js'), ...toCliArgs(words)]);
           },
@@ -997,6 +1368,12 @@ export function targetGroups() {
         {
           name: 'watchdog-dry',
           summary: 'the same check with nothing sent',
+          /**
+           * The `watchdog-dry` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             node([path.join('src', 'watchdog.js'), '--dry-run']);
           },
@@ -1009,6 +1386,12 @@ export function targetGroups() {
         {
           name: 'list-channels',
           summary: 'the configured channels and the playlists each one asks for',
+          /**
+           * The `list-channels` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             const parse = await channelParser();
             const mod = await import(pathToFileURL(path.join(ROOT, 'src', 'index.js')).href);
@@ -1033,6 +1416,13 @@ export function targetGroups() {
           name: 'add-channel',
           args: '<@Handle> [after=…] [older=keep|remove] [shorts=no|yes|only|split]',
           summary: 'append a validated line to config/channels.txt',
+          /**
+           * The `add-channel` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run(words) {
             const [handle, ...settings] = words;
             if (!handle) fail('add-channel needs a handle, e.g. add-channel "@SomeChannel"');
@@ -1063,6 +1453,13 @@ export function targetGroups() {
           name: 'remove-channel',
           args: '<@Handle>',
           summary: 'drop a line from config/channels.txt (leaves the playlist and ledger alone)',
+          /**
+           * The `remove-channel` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             const [handle] = words;
             if (!handle) fail('remove-channel needs a handle');
@@ -1086,6 +1483,12 @@ export function targetGroups() {
         {
           name: 'claim',
           summary: 'take this account’s sync marker over from another machine (50 quota units)',
+          /**
+           * The `claim` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             // --claim-sync refuses to run without a TTY, which is what makes two machines
             // claiming an account back from each other nightly unreachable rather than
@@ -1096,6 +1499,12 @@ export function targetGroups() {
         {
           name: 'unclaim',
           summary: 'give this machine\u2019s claim up, so another machine can take the account',
+          /**
+           * The `unclaim` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             requireNotScheduled('unclaim');
             node([path.join('src', 'index.js'), '--unclaim-sync']);
@@ -1104,6 +1513,12 @@ export function targetGroups() {
         {
           name: 'unclaim-all',
           summary: 'clear every claim on the account - the next machine to sync takes it',
+          /**
+           * The `unclaim-all` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             requireNotScheduled('unclaim-all');
             node([path.join('src', 'index.js'), '--unclaim-all']);
@@ -1119,6 +1534,12 @@ export function targetGroups() {
         {
           name: 'check',
           summary: 'everything lint and the tests cannot see: secrets, manifest, links, endings',
+          /**
+           * The `check` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             const { runAllChecks } = await loadChecks();
     const findings = await runAllChecks({
@@ -1133,6 +1554,12 @@ export function targetGroups() {
         {
           name: 'ci',
           summary: 'lint, tests and every check - what the pre-push hook runs. Reports all failures',
+          /**
+           * The `ci` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             // Deliberately does not stop at the first failure. "Fix one, run again, find
             // the next" is how a pre-push gate becomes something people skip with
@@ -1160,6 +1587,12 @@ export function targetGroups() {
         {
           name: 'sync-shims',
           summary: 'regenerate the target list inside Makefile and build.ps1',
+          /**
+           * The `sync-shims` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             const current = Object.fromEntries(
               Object.keys(SHIM_MARKERS).map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')])
@@ -1183,6 +1616,12 @@ export function targetGroups() {
         {
           name: 'status',
           summary: 'is the nightly job installed, and when did a sync last finish',
+          /**
+           * The `status` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             requireKnownPlatform('status');
             console.log(`\n  Scheduled jobs (${IS_MACOS ? 'launchd' : 'Task Scheduler'}):`);
@@ -1193,6 +1632,12 @@ export function targetGroups() {
         {
           name: 'install',
           summary: `register the nightly sync and the watchdog (${IS_MACOS ? 'needs sudo, once' : 'Task Scheduler'})`,
+          /**
+           * The `install` target.
+           *
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run() {
             requireKnownPlatform('install');
             await requireRealGoogleCredentials();
@@ -1208,6 +1653,12 @@ export function targetGroups() {
         {
           name: 'uninstall',
           summary: 'remove both scheduled jobs; state/, logs/ and the playlists are untouched',
+          /**
+           * The `uninstall` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             requireKnownPlatform('uninstall');
             return IS_MACOS ? uninstallMac() : uninstallWindows();
@@ -1217,6 +1668,13 @@ export function targetGroups() {
           name: 'change-run-time',
           args: '<HHMM>',
           summary: 'move the nightly sync (the watchdog follows, six hours later)',
+          /**
+           * The `change-run-time` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             const [when, ...rest] = words;
             if (!when) {
@@ -1261,6 +1719,12 @@ export function targetGroups() {
         {
           name: 'run-now',
           summary: 'trigger the scheduled sync immediately, through the scheduler itself',
+          /**
+           * The `run-now` target.
+           *
+           * @returns {number|void} The command's exit status, when one was run.
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             requireKnownPlatform('run-now');
             // Through the scheduler rather than by calling node: this is how to find out
@@ -1278,6 +1742,12 @@ export function targetGroups() {
         {
           name: 'report',
           summary: 'open the last run’s report.html',
+          /**
+           * The `report` target.
+           *
+           * @returns {number|void} The command's exit status, when one was run.
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             if (!exists(REPORT)) fail('no report.html yet - run a sync first');
             if (IS_MACOS) return run('open', [REPORT]);
@@ -1289,6 +1759,13 @@ export function targetGroups() {
           name: 'logs',
           args: '[lines]',
           summary: 'the tail of logs/sync.log (default 40 lines)',
+          /**
+           * The `logs` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run(words) {
             // Read and slice here rather than shelling out: Windows has no tail, and the
             // point of this file is that a target works the same on both platforms.
@@ -1303,6 +1780,12 @@ export function targetGroups() {
         {
           name: 'clean',
           summary: 'delete logs/ and report.html - never state/, which holds the watched ledger',
+          /**
+           * The `clean` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             for (const p of CLEAN_PATHS) {
               const full = path.join(ROOT, p);
@@ -1317,6 +1800,12 @@ export function targetGroups() {
         {
           name: 'from-release',
           summary: 'set a release kit up on a machine with no dev tooling: deps, .env, channels, next steps',
+          /**
+           * The `from-release` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             // A kit is an export of tracked files, so it has no .git. `setup` would try to
             // point git at .githooks here and fail on a directory that is not a repository -
@@ -1387,6 +1876,13 @@ export function targetGroups() {
           name: 'release',
           args: '[dry=1]',
           summary: 'cut a release: name the Unreleased section after HEAD, tag it, publish it on GitHub',
+          /**
+           * The `release` target.
+           *
+           * @param {string[]} words - Words after the target name.
+           * @returns {Promise<void>}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           async run(words) {
             const dry = words.some((w) => w === 'dry=1' || w === 'dry=true');
             const rest = words.filter((w) => !/^dry=/.test(w));
@@ -1402,6 +1898,12 @@ export function targetGroups() {
         {
           name: 'version',
           summary: 'what this checkout is: package version, commit, node, platform',
+          /**
+           * The `version` target.
+           *
+           * @returns {void}
+           * @throws {Fail} When the target cannot do its job; the message says why.
+           */
           run() {
             const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
             const sha = capture('git', ['rev-parse', '--short', 'HEAD']).out || 'unknown';
@@ -1429,6 +1931,10 @@ export function targetGroups() {
  * Documentary, not semantic - there is no build step, so the only thing a version can
  * usefully name is the commit a deployment came from. Shared with `make version` so the
  * string it previews and the string `make release` writes cannot drift apart.
+ *
+ * @param {string} sha - Short commit id.
+ * @param {Date} [now=new Date()] - Release date (UTC).
+ * @returns {string} `YYYY.MM.DD-<sha>`.
  */
 export function versionString(sha, now = new Date()) {
   return `${now.toISOString().slice(0, 10).replace(/-/g, '.')}-${sha}`;
@@ -1442,6 +1948,11 @@ export function versionString(sha, now = new Date()) {
  * renames every release and breaks the features.yaml `release:` cross-reference.
  *
  * Pure, so the format is testable without a git checkout or a network.
+ *
+ * @param {string} unreleasedHeading - The `## Unreleased ...` line.
+ * @param {string} version - From {@link versionString}.
+ * @param {string} date - `YYYY-MM-DD`.
+ * @returns {string} `## <version> — <date>`, plus ` (<description>)` when there was one.
  */
 export function releaseHeading(unreleasedHeading, version, date) {
   // The separator is optional: a bare "## Unreleased" is a legitimate heading, and a
@@ -1453,6 +1964,11 @@ export function releaseHeading(unreleasedHeading, version, date) {
 /**
  * Split VERSIONS.md into the Unreleased heading, its body, and the rest.
  * Returns null when there is no Unreleased section at all.
+ *
+ * @param {string} text - VERSIONS.md text.
+ * @returns {?{lines: string[], start: number, end: number, heading: string, body: string}}
+ *   All lines, the heading's index, the index of the next `## ` heading (or the line
+ *   count), the heading itself and the trimmed body.
  */
 export function unreleasedSection(text) {
   const lines = String(text).split('\n');
@@ -1481,6 +1997,11 @@ export function unreleasedSection(text) {
  * The tag is pushed before the GitHub release is created because `gh release create`
  * against a tag the remote has never seen creates the tag itself, from whatever the
  * remote's default branch happens to point at - which is not necessarily what was tested.
+ *
+ * @param {{dry: boolean}} options - `dry` previews and changes nothing.
+ * @returns {Promise<void>}
+ * @throws {Fail} On a dirty tree, an existing tag, an empty Unreleased section, no gh
+ *   access, failed verification (after rolling back), or any failing git/gh step.
  */
 async function cutRelease({ dry }) {
   // A release names a commit, so the tree has to *be* that commit. Tagging a dirty tree
@@ -1546,6 +2067,7 @@ async function cutRelease({ dry }) {
     .replace(/^updated: .*$/m, `updated: ${today}`);
   fs.writeFileSync(FEATURES_YAML, featuresAfter);
 
+  /** Restore VERSIONS.md and features.yaml to what they were before the edit. */
   const rollback = () => {
     fs.writeFileSync(VERSIONS_MD, section.lines.join('\n'));
     fs.writeFileSync(FEATURES_YAML, featuresBefore);
@@ -1610,7 +2132,14 @@ async function cutRelease({ dry }) {
 // Help
 // ---------------------------------------------------------------------------------
 
-/** Wrap `text` to `width`, indenting every line after the first by `indent` spaces. */
+/**
+ * Wrap `text` to `width`, indenting every line after the first by `indent` spaces.
+ *
+ * @param {string} text - Text to wrap at whitespace.
+ * @param {number} width - Maximum line length (a single longer word is kept whole).
+ * @param {number} indent - Spaces before each continuation line.
+ * @returns {string} The wrapped text.
+ */
 function wrap(text, width, indent) {
   const out = [];
   let line = '';
@@ -1626,6 +2155,16 @@ function wrap(text, width, indent) {
   return out.join(`\n${' '.repeat(indent)}`);
 }
 
+/**
+ * The text `make help` prints: every target with its summary and argument synopsis,
+ * then examples and the argument rules.
+ *
+ * @param {TargetGroup[]} groups - The registry.
+ * @param {object} [options]
+ * @param {string} [options.how=invocation()] - `make` or `.\build.ps1`.
+ * @param {number} [options.width=96] - Wrap width.
+ * @returns {string} The help text.
+ */
 export function renderHelp(groups, { how = invocation(), width = 96 } = {}) {
   const names = groups.flatMap((g) => g.items.map((t) => t.name));
   const col = Math.max(...names.map((n) => n.length)) + 2;
@@ -1676,6 +2215,10 @@ export function renderHelp(groups, { how = invocation(), width = 96 } = {}) {
  * `sync-shims` rewrites it, and `check` fails when it has drifted. Generated rather than
  * hand-kept because a hand-kept list is exactly the stale menu this design set out to
  * avoid.
+ *
+ * @param {TargetGroup[]} groups - The registry.
+ * @param {string} prefix - Comment prefix for each line in that shim's language.
+ * @returns {string} The block, without the markers.
  */
 export function shimTargetBlock(groups, prefix) {
   const names = groups.flatMap((g) => g.items.map((t) => t.name));
@@ -1688,12 +2231,25 @@ export function shimTargetBlock(groups, prefix) {
   return out.join('\n');
 }
 
+/**
+ * Where each shim carries its generated target list: marker lines and the per-line
+ * comment prefix.
+ *
+ * @type {Object<string, {start: string, end: string, prefix: string}>}
+ */
 export const SHIM_MARKERS = {
   'Makefile': { start: '# >>> targets >>>', end: '# <<< targets <<<', prefix: '#   ' },
   'build.ps1': { start: '    # >>> targets >>>', end: '    # <<< targets <<<', prefix: '    #   ' },
 };
 
-/** Replace whatever sits between the markers with `body`. Returns null if absent. */
+/**
+ * Replace whatever sits between the markers with `body`. Returns null if absent.
+ *
+ * @param {string} content - File text.
+ * @param {{start: string, end: string}} markers - Marker lines.
+ * @param {string} body - New text between them.
+ * @returns {?string} The new file text, or null when a marker is missing or out of order.
+ */
 export function spliceBetween(content, { start, end }, body) {
   const a = content.indexOf(start);
   const b = content.indexOf(end);
@@ -1701,7 +2257,13 @@ export function spliceBetween(content, { start, end }, body) {
   return `${content.slice(0, a + start.length)}\n${body}\n${content.slice(b)}`;
 }
 
-/** The shim contents the registry currently implies, keyed by filename. */
+/**
+ * The shim contents the registry currently implies, keyed by filename.
+ *
+ * @param {TargetGroup[]} groups - The registry.
+ * @param {Object<string, string>} current - Current shim text by file name.
+ * @returns {Object<string, string>} New text for each shim that has its markers.
+ */
 export function renderShims(groups, current) {
   const out = {};
   for (const [file, markers] of Object.entries(SHIM_MARKERS)) {
@@ -1716,7 +2278,11 @@ export function renderShims(groups, current) {
 // Dispatch
 // ---------------------------------------------------------------------------------
 
-/** What the shims say now, and what the registry says they should say. */
+/**
+ * What the shims say now, and what the registry says they should say.
+ *
+ * @returns {{current: Object<string, string>, expected: Object<string, string>}} Both.
+ */
 function shimState() {
   const current = Object.fromEntries(
     Object.keys(SHIM_MARKERS).map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')])
@@ -1724,12 +2290,22 @@ function shimState() {
   return { current, expected: renderShims(targetGroups(), current) };
 }
 
-/** Every target name, for the docs check and the shim list. */
+/**
+ * Every target name, for the docs check and the shim list.
+ *
+ * @param {TargetGroup[]} [groups=targetGroups()] - The registry.
+ * @returns {string[]} Names in display order.
+ */
 export function allTargetNames(groups = targetGroups()) {
   return groups.flatMap((g) => g.items.map((t) => t.name));
 }
 
-/** Print findings grouped by level, worst first, and summarise. */
+/**
+ * Print findings grouped by level, worst first, and summarise.
+ *
+ * @param {import('./checks.js').Finding[]} findings - What the checks returned.
+ * @returns {void}
+ */
 function report(findings) {
   const errors = findings.filter((f) => f.level === 'error');
   const warnings = findings.filter((f) => f.level === 'warn');
@@ -1744,17 +2320,37 @@ function report(findings) {
   // --no-verify.
 }
 
+/**
+ * Look a target up by exact name.
+ *
+ * @param {TargetGroup[]} groups - The registry.
+ * @param {string} name - Target name.
+ * @returns {?Target} The target, or null.
+ */
 export function findTarget(groups, name) {
   return groups.flatMap((g) => g.items).find((t) => t.name === name) || null;
 }
 
-/** Targets whose names are close enough to `name` to be worth suggesting. */
+/**
+ * Targets whose names are close enough to `name` to be worth suggesting.
+ *
+ * @param {TargetGroup[]} groups - The registry.
+ * @param {string} name - What was typed.
+ * @returns {string[]} Names sharing its first three letters, or containing / contained in it.
+ */
 export function suggestions(groups, name) {
   const all = groups.flatMap((g) => g.items.map((t) => t.name));
   const n = String(name).toLowerCase();
   return all.filter((t) => t.startsWith(n.slice(0, 3)) || t.includes(n) || n.includes(t));
 }
 
+/**
+ * Dispatch one target. No target (or help) prints the help.
+ *
+ * @param {string[]} argv - Target name followed by its words.
+ * @returns {Promise<void>}
+ * @throws {Fail} On an unknown target, a swallowed make flag, or the target's own failure.
+ */
 async function main(argv) {
   const groups = targetGroups();
   const [name, ...words] = argv;
@@ -1774,6 +2370,7 @@ async function main(argv) {
   await target.run(words);
 }
 
+/** True when this file is the process entry point rather than imported by a test. */
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   main(process.argv.slice(2)).catch((err) => {

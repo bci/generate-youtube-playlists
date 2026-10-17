@@ -1,9 +1,22 @@
+/**
+ * Tests for the watchdog: the staleness rule, its flags, and the alert body.
+ *
+ * @module test/watchdog
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkStale, buildAlertHtml } from '../src/heartbeat.js';
 import { parseWatchdogArgs } from '../src/watchdog.js';
 
+/** The fixed "now" every staleness check is measured from. */
 const NOW = new Date('2026-08-21T09:00:00Z');
+/**
+ * A heartbeat that finished `h` hours before {@link NOW}.
+ *
+ * @param {number} h - Hours.
+ * @returns {{finishedAt: string}} The heartbeat.
+ */
 const hoursAgo = (h) => ({ finishedAt: new Date(NOW.getTime() - h * 3_600_000).toISOString() });
 
 test('a run inside the window is not stale', () => {

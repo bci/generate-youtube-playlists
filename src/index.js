@@ -1,3 +1,22 @@
+/**
+ * CLI entry point (`npm start`): parse the channel list, run the phased sync, write the
+ * report and heartbeat, and email whoever needs to hear about it.
+ *
+ * The run is deliberately phased, because quota can run out part-way and the report
+ * still has to be true (AGENTS.md, "The shape of a run"):
+ *
+ *   1.   read every channel and diff every playlist — no writes
+ *   1.5  delete watched and below-cutoff videos, under one `--max-removals` ceiling
+ *   2.   insert missing videos, smallest backlog first, under `--max`
+ *   then persist the watched ledgers, write report.html and the heartbeat, send mail
+ *
+ * `--unclaim-sync` / `--unclaim-all` are a separate, standalone mode; see
+ * {@link runUnclaim}. The parsing helpers are exported for the tests and for make.js,
+ * which validates channel lines with exactly this parser.
+ *
+ * @module index
+ */
+
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -30,11 +49,59 @@ import { writeHeartbeat } from './heartbeat.js';
 import { sendReport } from './email.js';
 import { buildHtml, sortByChannel } from './report.js';
 
+/** Directory holding this module (`src/`). */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Repository root. */
 const ROOT = path.resolve(__dirname, '..');
+/** The channel list read when no channel is named on the command line. */
 const DEFAULT_CONFIG = path.join(ROOT, 'config', 'channels.txt');
+/** Where the HTML report is written. */
 const REPORT_PATH = path.join(ROOT, 'report.html');
+/** Watched ledgers and the heartbeat. */
 const STATE_DIR = path.join(ROOT, 'state');
+
+/**
+ * Options parsed from the command line by {@link parseArgs}.
+ *
+ * @typedef {object} CliOptions
+ * @property {string[]} channels - Handles named on the command line.
+ * @property {boolean} email - `--email`: always mail the report.
+ * @property {boolean} emailOnChange - `--email-on-change`: the scheduled mode.
+ * @property {boolean} dryRun - `--dry-run`: read everything, write nothing to YouTube.
+ * @property {number} maxAdds - `--max=N`: insert ceiling for the run.
+ * @property {boolean} ignoreWatched - `--ignore-watched`: skip the watched signals.
+ * @property {boolean} reportWatched - `--report-watched`: detect but do not delete.
+ * @property {boolean} pruneWatched - Derived: delete watched videos this run.
+ * @property {boolean} unlike - `--unlike`: clear the like after deleting a liked video.
+ * @property {number} maxRemovals - `--max-removals=N`: deletion ceiling for the run.
+ * @property {string} watchedPlaylist - `--watched-playlist=`: curated playlist title.
+ * @property {boolean} claimSync - `--claim-sync`: take a foreign marker over.
+ * @property {boolean} unclaimSync - `--unclaim-sync`: release our marker and stop.
+ * @property {boolean} unclaimAll - `--unclaim-all`: release every marker and stop.
+ * @property {?Date} after - `--after=`: run-wide cutoff override.
+ * @property {?('keep'|'remove')} older - `--older=`: run-wide keep/remove override.
+ * @property {?('no'|'yes'|'only'|'split')} shorts - `--shorts=`: run-wide Shorts override.
+ * @property {string} config - `--config=`: channel list path.
+ */
+
+/**
+ * One parsed channel line; see {@link parseChannelSpec}.
+ *
+ * @typedef {object} ChannelSpec
+ * @property {string} handle - `@Handle` as written.
+ * @property {?Date} after - Inclusive UTC-midnight cutoff, or null.
+ * @property {boolean} removeBefore - `older=remove` (the default) versus `older=keep`.
+ * @property {'no'|'yes'|'only'|'split'} shorts - Shorts mode.
+ * @property {?string} shortsTitle - Custom title for the playlist holding the Shorts.
+ */
+
+/**
+ * One playlist a channel line asks for; see {@link targetsFor}.
+ *
+ * @typedef {object} PlaylistTarget
+ * @property {string} playlistTitle - Title of the playlist to maintain.
+ * @property {'videos'|'shorts'} want - Which half of the channel's read it holds.
+ */
 
 // Load .env (Graph email credentials) if present.
 try {
@@ -47,28 +114,42 @@ try {
 // the mailing list is not. ERROR_ALERT_TO separates operator noise (failures, watched
 // previews) from the audience that only wants to hear about real playlist progress; it
 // falls back to REPORT_TO when there is nobody separate to page.
+/** Who receives the progress report (REPORT_TO in .env). */
 const REPORT_TO = process.env.REPORT_TO;
+/** Who receives failures, conflicts and watched previews; falls back to REPORT_TO. */
 const ERROR_ALERT_TO = process.env.ERROR_ALERT_TO || REPORT_TO;
-// Optional label for the report header, e.g. the account that owns the playlists.
+/** Optional label for the report header, e.g. the account that owns the playlists. */
 const ACCOUNT_LABEL = process.env.ACCOUNT_LABEL || '';
-// The `shorts=` modes, in the order the docs introduce them. `split` is the only
-// one that makes a channel line describe two playlists instead of one.
+/**
+ * The `shorts=` modes, in the order the docs introduce them. `split` is the only
+ * one that makes a channel line describe two playlists instead of one.
+ */
 const SHORTS_MODES = ['no', 'yes', 'only', 'split'];
+/** Subject of the progress report sent to REPORT_TO. */
 const REPORT_SUBJECT = 'YouTube Playlists — Update';
+/** Subject of the operator alert when a playlist ended in an error. */
 const ERROR_SUBJECT = 'YouTube Playlists — sync error';
+/** Subject of the operator alert when another machine holds the sync marker. */
 const MARKER_SUBJECT = 'YouTube Playlists — another machine is syncing this account';
-// Written into the marker playlist itself, because the person who finds an unexplained
-// empty playlist on their account will look here before they look in a repo.
+/**
+ * Written into the marker playlist itself, because the person who finds an unexplained
+ * empty playlist on their account will look here before they look in a repo.
+ */
 const MARKER_DESCRIPTION =
   'Marker left by generate-youtube-playlists so it can tell whether another machine is ' +
   'already syncing this account. Empty on purpose. Deleting it makes the next run claim ' +
   'the account again.';
+/** Subject of the operator mail previewing watched videos that were not deleted. */
 const WATCHED_SUBJECT = 'YouTube Playlists — watched videos detected (preview)';
 
 /**
  * A cap of 0 means "do none of this", so it cannot be folded into the unlimited
  * default. `parseInt(x, 10) || Infinity` did exactly that, which inverted the flag:
  * --max-removals=0, passed to hold removals back, authorised unlimited removals.
+ *
+ * @param {string} raw - The text after `=`.
+ * @param {string} flag - The whole argument, for the warning.
+ * @returns {number} A non-negative integer; Infinity (with a warning) when unparseable.
  */
 function parseLimit(raw, flag) {
   const n = parseInt(raw, 10);
@@ -77,6 +158,14 @@ function parseLimit(raw, flag) {
   return Infinity;
 }
 
+/**
+ * Parse the sync's command line. Bare words are channel handles; unknown `--flags` are
+ * warned about and ignored.
+ *
+ * @param {string[]} argv - Arguments after the script name.
+ * @returns {CliOptions} The options, with defaults applied and `pruneWatched` derived.
+ * @throws {Error} When `--after=`, `--older=` or `--shorts=` has an invalid value.
+ */
 export function parseArgs(argv) {
   const opts = {
     channels: [],
@@ -132,7 +221,14 @@ export function parseArgs(argv) {
   return opts;
 }
 
-// Google error messages sometimes embed HTML (e.g. the quota link). Strip it.
+/**
+ * One-line error text for the console and the report.
+ *
+ * Google error messages sometimes embed HTML (e.g. the quota link). Strip it.
+ *
+ * @param {*} err - Anything thrown.
+ * @returns {string} The API's message (or the error's), tags removed, whitespace collapsed.
+ */
 function cleanErr(err) {
   const raw = err?.response?.data?.error?.message || err?.message || String(err);
   return raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -147,6 +243,11 @@ function cleanErr(err) {
  * Throws rather than warning-and-ignoring. The config is read once, before a single
  * quota unit is spent, and a typo that silently meant "no cutoff" would backfill a
  * whole back catalogue — or, worse, delete on the wrong side of a date.
+ *
+ * @param {string} raw - The date as written.
+ * @param {string} context - The line or flag it came from, for the error message.
+ * @returns {Date} UTC midnight of that day.
+ * @throws {Error} When it is not `YYYY-MM-DD` or not a real calendar date.
  */
 function parseCutoff(raw, context) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
@@ -162,7 +263,14 @@ function parseCutoff(raw, context) {
   return d;
 }
 
-/** `older=` accepts only these two, and says so naming what was actually written. */
+/**
+ * `older=` accepts only these two, and says so naming what was actually written.
+ *
+ * @param {string} raw - The value as written (case-insensitive).
+ * @param {string} context - The line or flag it came from, for the error message.
+ * @returns {'keep'|'remove'} The normalized value.
+ * @throws {Error} On any other value.
+ */
 function parseOlder(raw, context) {
   const value = String(raw).trim().toLowerCase();
   if (value !== 'keep' && value !== 'remove') {
@@ -175,6 +283,11 @@ function parseOlder(raw, context) {
  * `shorts=` accepts only the four modes. Fatal on anything else for the same reason a
  * bad date is: a silently-ignored `shorts=split` leaves the second playlist
  * uncreated, which looks exactly like the tool having missed the channel's Shorts.
+ *
+ * @param {string} raw - The value as written (case-insensitive).
+ * @param {string} context - The line or flag it came from, for the error message.
+ * @returns {'no'|'yes'|'only'|'split'} The normalized mode.
+ * @throws {Error} On any other value.
  */
 function parseShorts(raw, context) {
   const value = String(raw).trim().toLowerCase();
@@ -195,6 +308,10 @@ function parseShorts(raw, context) {
  * An unbalanced quote is fatal rather than being split into nonsense fields, because
  * the "Unrecognised field" it would otherwise produce names a fragment of the title
  * instead of the actual mistake.
+ *
+ * @param {string} line - One line of the channel list.
+ * @returns {string[]} The fields, quotes still attached.
+ * @throws {Error} When the line has an odd number of `"`.
  */
 export function tokenizeChannelLine(line) {
   const text = String(line).trim();
@@ -204,7 +321,15 @@ export function tokenizeChannelLine(line) {
   return text.match(/\S*"[^"]*"\S*|\S+/g) || [];
 }
 
-/** Strip the quotes a tokenized value may carry, and require something inside. */
+/**
+ * Strip the quotes a tokenized value may carry, and require something inside.
+ *
+ * @param {string} raw - The value half of a `key=value` field.
+ * @param {string} key - The key, for the error message.
+ * @param {string} line - The whole line, for the error message.
+ * @returns {string} The trimmed value.
+ * @throws {Error} When the value is empty or only whitespace.
+ */
 function unquote(raw, key, line) {
   const value = /^"(.*)"$/.exec(raw)?.[1] ?? raw;
   if (!value.trim()) throw new Error(`${key}= needs a value, in channel line: ${line}`);
@@ -242,6 +367,11 @@ function unquote(raw, key, line) {
  * something else: an ignored date backfills a back catalogue or deletes on the wrong
  * side of a line, and an ignored `shorts=` leaves a Shorts-only channel with the empty
  * playlist the field exists to fix.
+ *
+ * @param {string} line - One non-comment line of the channel list.
+ * @returns {ChannelSpec} The parsed line, with defaults applied.
+ * @throws {Error} On an unknown field, a malformed value, `older=` without `after=`, or
+ *   `shorts-title=` without `shorts=split` / `shorts=only`.
  */
 export function parseChannelSpec(line) {
   const [handle, ...fields] = tokenizeChannelLine(line);
@@ -294,6 +424,10 @@ export function parseChannelSpec(line) {
  *
  * `want` is what getPlaylistStatus() slices out of the single per-channel read, so
  * both targets of a split channel are diffed against one listing and one Shorts probe.
+ *
+ * @param {ChannelSpec} spec - The parsed channel line.
+ * @param {string} name - The channel's name (its handle without `@`), the default title.
+ * @returns {PlaylistTarget[]} One target, or two for `shorts=split`.
  */
 export function targetsFor(spec, name) {
   switch (spec.shorts) {
@@ -313,6 +447,14 @@ export function targetsFor(spec, name) {
   }
 }
 
+/**
+ * Read and parse the channel list. Blank lines and `#` comments are skipped.
+ *
+ * @param {string} configPath - Path to `channels.txt`.
+ * @returns {Promise<ChannelSpec[]>} One spec per channel line, in file order.
+ * @throws {Error} When the file is missing (with a message naming the template to copy),
+ *   unreadable, or contains a malformed line.
+ */
 async function readChannelConfig(configPath) {
   let content;
   try {
@@ -339,6 +481,10 @@ async function readChannelConfig(configPath) {
  * added/removed/total, so the watched-ledger internals — how many videos are known
  * watched, how many are being held out of re-adds — surface here instead, where
  * whoever is debugging the nightly reads them.
+ *
+ * @param {object} s - One playlist's summary: a report row plus the watched-ledger counts
+ *   (`seenCount`, `wouldSkip`, `justLiked`, `justSaved`, `justWatched`).
+ * @returns {string} Space-separated fields, starting with `<count>/<total> videos`.
  */
 export function summaryLine(s) {
   // Liked, saved to the "Watched" playlist and removed-by-hand are three signals for
@@ -366,6 +512,13 @@ export function summaryLine(s) {
     .join('  ');
 }
 
+/**
+ * Print the end-of-run summary, one line per playlist (plus its URL), sorted by channel.
+ *
+ * @param {Array<object>} summaries - Every playlist's summary, errors included.
+ * @param {?string} warning - The sync-marker warning to repeat at the top, if any.
+ * @returns {void}
+ */
 function printConsole(summaries, warning) {
   console.log('\n=== Summary ===');
   // Repeated at the end as well as where it was found: phase 1 scrolls a long way up
@@ -391,6 +544,13 @@ function printConsole(summaries, warning) {
  * mistake (a machine retired without deleting its marker; a hostname changed by a new
  * network), and a guard that stops the nightly sync on a false positive would be this
  * project's own favourite failure mode, self-inflicted. It reports instead.
+ *
+ * Costs one listing (1 unit per 50 playlists), plus 50 units when it creates or renames
+ * a marker. Every API failure is downgraded to a console warning.
+ *
+ * @param {import('./youtube.js').YouTubeClient} youtube - API client.
+ * @param {CliOptions} opts - Uses `dryRun` and `claimSync`.
+ * @returns {Promise<?string>} The conflict warning, or null when there is nothing to say.
  */
 export async function checkSyncMarker(youtube, opts) {
   const key = machineKey(os.hostname());
@@ -473,6 +633,11 @@ export async function checkSyncMarker(youtube, opts) {
  * the run that follows would be the one to re-create the marker.
  *
  * Costs one listing (1 unit) plus 50 per marker deleted. Returns the process exit code.
+ *
+ * @param {import('./youtube.js').YouTubeClient} youtube - API client.
+ * @param {CliOptions} opts - Uses `unclaimAll` and `dryRun`.
+ * @returns {Promise<number>} 0 on success or nothing to do; 1 when the playlists could not
+ *   be read or no marker could be deleted.
  */
 export async function runUnclaim(youtube, opts) {
   const key = machineKey(os.hostname());
@@ -529,6 +694,18 @@ export async function runUnclaim(youtube, opts) {
   return 0;
 }
 
+/**
+ * Run the sync end to end; see the module comment for the phases.
+ *
+ * Exits the process directly for a refused claim/unclaim, after an unclaim, and when no
+ * channel is configured. Otherwise sets `process.exitCode` to 1 when a mail could not be
+ * sent or no recipient is configured.
+ *
+ * @returns {Promise<void>}
+ * @throws {Error} On a malformed channel list or flag, missing Google credentials, or a
+ *   failure writing report.html / the heartbeat. Per-channel API errors are caught and
+ *   reported instead.
+ */
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -704,6 +881,13 @@ async function main() {
     // predates the channel's `after=` cutoff (that channel's own keep/remove decides).
     // Both draw on the same ~200 writes a day, so they go through one pass under one
     // --max-removals ceiling rather than racing each other for the budget.
+    /**
+     * The deletions one playlist gets this run: its watched videos when pruning is on,
+     * plus its below-cutoff videos (empty unless `older=remove`).
+     *
+     * @param {import('./youtube.js').PlaylistStatus} s - One playlist's status.
+     * @returns {import('./youtube.js').RemovalItem[]} Items for {@link applyRemovals}.
+     */
     const removalsFor = (s) => [
       ...(opts.pruneWatched ? s.toRemove || [] : []),
       ...(s.toDrop || []),
@@ -884,7 +1068,7 @@ async function main() {
   }
 }
 
-// Only run the workflow when executed directly (not when imported by tests).
+/** Only run the workflow when executed directly (not when imported by tests). */
 const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {

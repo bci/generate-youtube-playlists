@@ -1,3 +1,12 @@
+/**
+ * Tests for make.js's pure helpers: `clean` never touching state/, argument and
+ * MAKEFLAGS handling, channels.txt and .env editing, time parsing and plist rewriting,
+ * credential placeholders, OAuth error wording, help and shim rendering, and the
+ * release heading / version string.
+ *
+ * @module test/make
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -1,14 +1,31 @@
+/**
+ * Tests for giving a sync claim up: planUnclaim's decision, the terminal check for the
+ * unclaim flags, and runUnclaim's deletions against a mocked client.
+ *
+ * @module test/unclaim
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'os';
 import { runUnclaim } from '../src/index.js';
 import { checkUnclaimSync, machineKey, markerTitle, planUnclaim } from '../src/marker.js';
 
+/** This machine's key, as the code under test computes it. */
 const OUR_KEY = machineKey(os.hostname());
+/** This machine's marker title. */
 const OURS = markerTitle(OUR_KEY);
 
 // Same shape as marker-run.test.js: a mocked client, never the real API. Exercising this
 // for real would cost 50 units per marker per assertion.
+/**
+ * A client whose account holds playlists with these titles, recording deletions.
+ *
+ * @param {string[]} titles - Playlist titles on the account, in order.
+ * @param {object} [options]
+ * @param {?string} [options.failOn=null] - Title whose deletion throws.
+ * @returns {object} A mock client exposing the `deleted` titles.
+ */
 function fakeYouTube(titles, { failOn = null } = {}) {
   const deleted = [];
   return {

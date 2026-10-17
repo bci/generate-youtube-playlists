@@ -4,6 +4,13 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
+## Unreleased — documentation pass
+
+**Every declaration documented.** JSDoc on every module, function, method, class and
+module-level constant, comment-based help in `build.ps1` that `Get-Help` can now actually
+read, and Google-style headers on the `.sh` wrappers. No behaviour change: the JavaScript
+was verified AST-identical before and after.
+
 ## 2026.09.15-84b809c — 2026-09-15 (macOS scheduling (FEAT-0009), the sync marker (FEAT-0010), the task runner (FEAT-0011), releasing a claim (FEAT-0012), pre-push checks (FEAT-0013), a configurable schedule (FEAT-0014), cutting a release (FEAT-0015), installing from a release kit (FEAT-0016), verified credentials before scheduling (FEAT-0017) and a charset on the report (FEAT-0005))
 
 **Credentials are verified before anything is scheduled.** `doctor` now proves the Google

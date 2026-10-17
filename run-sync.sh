@@ -8,7 +8,14 @@
 # add --ignore-watched. Neither one ever re-adds a video already pruned.
 #
 # POSIX sh on purpose: /bin/sh, no bashisms. The macOS /bin/bash is 3.2 (2007) and a
-# daemon cannot count on a newer one being installed.
+# daemon cannot count on a newer one being installed. (So the Google Shell Style Guide's
+# [[ ]] and `local` do not apply here; the script has no functions.)
+#
+# Usage:     ./run-sync.sh            (normally run by launchd, not by hand)
+# Arguments: none - the flags are fixed in the node call below.
+# Outputs:   appends a start line, the run's console output and a finish line (with the
+#            exit status) to logs/sync.log; writes nothing to stdout.
+# Returns:   node's exit status, or 127 when no node binary can be found.
 
 set -u
 

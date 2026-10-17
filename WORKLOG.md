@@ -2,6 +2,49 @@
 
 Newest first. Absolute dates only.
 
+## 2026-10-16
+
+### Documentation pass: every declaration documented, no code changed
+
+CLAUDE.md gained core section 11 on 2026-10-13 ("document code completely, in the standard
+its own language's tools read"), and the code predated it: the *why* comments were already
+thorough, but only about 40% of declarations had a `/** */` block and almost none said what
+they take, return or throw. This pass closes that gap, done unattended overnight on a
+separate branch (`overnight-docs`) for Kent to review.
+
+**What changed.** A `@module` block at the top of every `.js` file (tests included), and
+JSDoc with `@param {type}`, `@returns {type}` and `@throws` on every function, method,
+class and module-level constant, private ones included — 295 of 299 declarations by a
+script count; the four left are one-line fixture lambdas inside test bodies. Shared object
+shapes became `@typedef`s (`PlaylistStatus`, `ChannelRead`, `ChannelSpec`, `CliOptions`,
+`Ledger`, `Heartbeat`, `Finding`, `Target`, ...). `build.ps1` gained `.EXAMPLE`, `.INPUTS`
+and `.OUTPUTS`; the two `.sh` wrappers gained Usage / Outputs / Returns headers.
+
+**Existing comments were kept, and moved rather than rewritten.** Where a `//` comment
+explained a constant or function it became that declaration's JSDoc, word for word. Three
+comments were *wrong* rather than incomplete, and were corrected instead of preserved:
+- `report.js`: the "Build the HTML report table" doc block sat above `sortByChannel`,
+  separated from `buildHtml` — it now heads `buildHtml`.
+- `checks.js`: `scanSecrets`'s doc block sat above `allowsCheck`'s, so each function wore
+  the other's description; and `checkEngines` claimed to check "a lockfile that exists",
+  which it never did.
+- `build.ps1` said "make.js refuses an empty argument"; it is the script itself that
+  refuses, because make.js never sees the argument at all.
+
+**`Get-Help .\build.ps1` did not work before this pass**, and nothing had noticed: a
+shebang line directly above the `<# ... #>` block stops PowerShell finding comment-based
+help (verified with pwsh 7 on a three-line script). One blank line after the shebang fixes
+it. That is the only non-comment character changed anywhere.
+
+**How "comments only" was verified**, rather than asserted: every tracked `.js` file was
+parsed with espree before and after and the ASTs compared with comments and positions
+stripped — all 28 identical. The shell and PowerShell files were compared with comment
+lines (and the `<# #>` block) removed — identical. Lint, the test suite and `make ci` ran
+before and after with the same results. README and AGENTS.md were brought up to date where
+they had drifted (the pre-push hook runs `make ci`, not lint-then-test; the files table and
+layout were missing `src/marker.js`, `checks.js` and the wrappers), and AGENTS.md gained a
+"Not done yet" section.
+
 ## 2026-09-15
 
 ### "Ready" was a lie on every new machine

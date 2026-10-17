@@ -1,3 +1,10 @@
+/**
+ * Tests for checkSyncMarker() in src/index.js — which branch runs, and which writes
+ * it makes — against a mocked client.
+ *
+ * @module test/marker-run
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'os';
@@ -9,8 +16,15 @@ import { machineKey, markerTitle } from '../src/marker.js';
 // someone deletes the marker, and testing that for real costs 100 units to exercise
 // three lines. Mocking is also how every other YouTube test here works.
 
+/** This machine's marker title, as the code under test computes it. */
 const OUR_TITLE = markerTitle(machineKey(os.hostname()));
 
+/**
+ * A client whose account holds playlists with these titles, recording every write.
+ *
+ * @param {string[]} titles - Playlist titles on the account, in order.
+ * @returns {object} A mock client exposing `calls.insert` and `calls.update`.
+ */
 function fakeYouTube(titles) {
   const calls = { insert: [], update: [] };
   return {

@@ -1,3 +1,11 @@
+/**
+ * Tests for the `shorts=` and `shorts-title=` settings: tokenizing quoted fields,
+ * parsing, the playlists each mode asks for, one read per channel for a split, and how
+ * the report and console describe each mode.
+ *
+ * @module test/shorts
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -151,6 +159,11 @@ test('--shorts= takes the same values as the field and defaults to off', () => {
  * short-listed and the probe never reaches the network. Tests that need a channel with
  * actual Shorts place the partition on the read by hand instead, which is the seam
  * getPlaylistStatus() actually consumes.
+ *
+ * @param {object} fixture
+ * @param {Array<object>} fixture.uploads - Upload playlist items to return.
+ * @param {Object<string, string>} [fixture.playlists={}] - Existing playlists, title -> id.
+ * @returns {object} A mock client exposing `calls` (read counts) and `inserted`.
  */
 function stubYouTube({ uploads, playlists = {} }) {
   const calls = { uploadsList: 0, videosList: 0, playlistRead: [] };

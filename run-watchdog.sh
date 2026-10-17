@@ -7,6 +7,15 @@
 #
 # Runs on its own trigger deliberately: if it shared the sync's schedule it would be
 # silent in exactly the case it exists to catch.
+#
+# POSIX sh, like run-sync.sh, so the Google Shell Style Guide's [[ ]] and `local` do not
+# apply; the script has no functions.
+#
+# Usage:     ./run-watchdog.sh        (normally run by launchd, not by hand)
+# Arguments: none.
+# Outputs:   appends a timestamp, the watchdog's output and a finish line (with the exit
+#            status) to logs/watchdog.log; writes nothing to stdout.
+# Returns:   node's exit status, or 127 when no node binary can be found.
 
 set -u
 

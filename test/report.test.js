@@ -1,3 +1,10 @@
+/**
+ * Tests for src/report.js: escaping, sorting, and the cells, status notes, banner and
+ * footnotes of the HTML report.
+ *
+ * @module test/report
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

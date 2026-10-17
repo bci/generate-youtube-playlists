@@ -1,3 +1,14 @@
+/**
+ * Google OAuth for the YouTube Data API: the authorized client every run uses, and the
+ * one-time interactive flow (`npm run authorize`) that mints its refresh token.
+ *
+ * Every credential comes from `.env` (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+ * GOOGLE_REFRESH_TOKEN). Nothing here is hard-coded, because this repo is public
+ * (CLAUDE.md section 12).
+ *
+ * @module auth
+ */
+
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -5,16 +16,30 @@ import { fileURLToPath } from 'url';
 import { authenticate } from '@google-cloud/local-auth';
 import { google } from 'googleapis';
 
+/** Directory holding this module (`src/`). */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Repository root, one level above `src/`. */
 const ROOT = path.resolve(__dirname, '..');
+/** The `.env` file the refresh token is written back into. */
 const ENV_PATH = path.join(ROOT, '.env');
 
-// YouTube (manage playlists). Gmail is NOT used — email goes via Microsoft Graph.
+/**
+ * OAuth scopes requested by `npm run authorize`.
+ *
+ * YouTube (manage playlists). Gmail is NOT used — email goes via Microsoft Graph.
+ *
+ * @type {string[]}
+ */
 export const SCOPES = ['https://www.googleapis.com/auth/youtube'];
 
 /**
  * Build an authorized OAuth2 client from env vars (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN).
  * googleapis auto-refreshes the access token from the refresh token on each call.
+ *
+ * @returns {Promise<import('googleapis').Auth.OAuth2Client>} A client carrying the refresh
+ *   token; no network call is made until it is first used.
+ * @throws {Error} When GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are missing, or when
+ *   GOOGLE_REFRESH_TOKEN is missing (the message says to run `npm run authorize`).
  */
 export async function getAuthorizedClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -36,7 +61,18 @@ export async function getAuthorizedClient() {
   return client;
 }
 
-/** Upsert a KEY=value line in the .env file. */
+/**
+ * Upsert a KEY=value line in the .env file.
+ *
+ * Rewrites the key's line in place when it exists and appends otherwise, so every other
+ * line of `.env` (comments included) is left as it was. A missing `.env` is created.
+ *
+ * @param {string} key - Variable name; used verbatim in a regular expression, so only
+ *   pass plain identifiers.
+ * @param {string} value - Value to store.
+ * @returns {Promise<void>}
+ * @throws {Error} When `.env` cannot be written.
+ */
 async function upsertEnv(key, value) {
   let env = '';
   try {
@@ -59,6 +95,12 @@ async function upsertEnv(key, value) {
  * Run the interactive browser OAuth flow (used by `npm run authorize`).
  * Builds a temporary client file from the env client id/secret so @google-cloud/local-auth
  * can run the loopback flow, then saves the resulting refresh token back into .env.
+ * The temporary file holds the client secret, so it is removed in a `finally` whether
+ * or not the flow succeeds.
+ *
+ * @returns {Promise<void>}
+ * @throws {Error} When the client id/secret are missing, when the browser flow fails, or
+ *   when Google returns no refresh token (the message says how to revoke and retry).
  */
 export async function runAuthFlow() {
   const clientId = process.env.GOOGLE_CLIENT_ID;

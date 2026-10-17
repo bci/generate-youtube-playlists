@@ -1,3 +1,49 @@
+/**
+ * The HTML run report and the cell/status wording it shares with the console summary.
+ *
+ * Pure: every function takes playlist summaries (the status objects built by
+ * {@link module:youtube.getPlaylistStatus} and updated by phases 1.5 and 2) and returns
+ * strings, so the report is testable without a run.
+ *
+ * @module report
+ */
+
+/**
+ * The per-playlist fields the report reads. A summary is the status object from
+ * {@link module:youtube.getPlaylistStatus}, plus the run flags `src/index.js` sets on it;
+ * only the fields used here are listed.
+ *
+ * @typedef {object} ReportRow
+ * @property {string} handle - `@Handle` of the channel.
+ * @property {string} [playlistTitle] - Playlist title (absent on a whole-channel error).
+ * @property {?string} [url] - Playlist URL, when the playlist exists.
+ * @property {?string} [error] - Error text; when set, the row shows only this.
+ * @property {boolean} [dryRun] - The run was `--dry-run`.
+ * @property {boolean} [previewRemovals] - Watched deletions were reported, not made.
+ * @property {number} [toAdd] - Videos missing from the playlist.
+ * @property {number} [added] - Videos inserted this run.
+ * @property {Array<object>} [toRemove] - Watched videos still in the playlist.
+ * @property {Array<object>} [toDrop] - Videos below the `after=` cutoff still in the playlist.
+ * @property {number} [removed] - Videos deleted this run.
+ * @property {number} [videoCount] - Videos in the playlist after the run.
+ * @property {number} [totalVideos] - Videos the playlist should hold.
+ * @property {string} [action] - `up to date`, `updated`, `created`, `will create`, ...
+ * @property {number} [shortsExcluded] - Shorts kept out of a videos playlist.
+ * @property {string} [shortsSibling] - Title of the split channel's Shorts playlist.
+ * @property {boolean} [shortsOnly] - This is a Shorts-only playlist.
+ * @property {boolean} [shortsMixedIn] - Shorts were not separated (`shorts=yes`).
+ * @property {?string} [after] - The `after=` cutoff as YYYY-MM-DD.
+ * @property {number} [outOfScope] - Uploads below the cutoff.
+ * @property {boolean} [manualSortRequired] - Inserts fell back to appending.
+ * @property {boolean} [quotaHit] - The run stopped on quota before finishing this playlist.
+ */
+
+/**
+ * Escape text for an HTML element body or a double-quoted attribute.
+ *
+ * @param {*} s - Any value; it is stringified first.
+ * @returns {string} The text with `&`, `<`, `>` and `"` escaped.
+ */
 export function esc(s) {
   return String(s).replace(
     /[&<>"]/g,
@@ -5,20 +51,35 @@ export function esc(s) {
   );
 }
 
-/** Build the HTML report table shared by the workflow and the standalone email test. */
-// Sort a copy of the summaries alphabetically (A-Z) by channel handle, for display.
-// Playlist title breaks the tie: a `shorts=split` channel contributes two rows under
-// one handle, and without it their order would depend on which finished first.
+/**
+ * Sort a copy of the summaries alphabetically (A-Z) by channel handle, for display.
+ *
+ * Playlist title breaks the tie: a `shorts=split` channel contributes two rows under
+ * one handle, and without it their order would depend on which finished first.
+ *
+ * @template {{handle?: string, playlistTitle?: string}} T
+ * @param {T[]} summaries - Rows to sort; not modified.
+ * @returns {T[]} A new, sorted array.
+ */
 export function sortByChannel(summaries) {
+  /**
+   * Sort key: handle, then playlist title, both lowercased.
+   *
+   * @param {T} s - A row.
+   * @returns {string} The key.
+   */
   const key = (s) => `${(s.handle || '').toLowerCase()}\x00${(s.playlistTitle || '').toLowerCase()}`;
   return [...summaries].sort((a, b) => key(a).localeCompare(key(b)));
 }
 
-// Empty numeric cell. A dash reads as "nothing happened" faster than a 0 does.
+/** Empty numeric cell. A dash reads as "nothing happened" faster than a 0 does. */
 const DASH = '—';
 
 /**
  * Videos added to the playlist this run — or, in --dry-run, how many would be.
+ *
+ * @param {ReportRow} s - One playlist's summary.
+ * @returns {string} `+N`, `N to add`, or a dash when there is nothing.
  */
 export function addedCell(s) {
   if (s.dryRun) return s.toAdd ? `${s.toAdd} to add` : DASH;
@@ -34,6 +95,9 @@ export function addedCell(s) {
  * --report-watched and --ignore-watched suppress just the watched deletions, and a
  * cutoff answers to the channel's own keep/remove. So a real run can genuinely
  * delete some videos while still only previewing others, and the cell says both.
+ *
+ * @param {ReportRow} s - One playlist's summary.
+ * @returns {string} `−N`, `N to remove`, `N would remove`, both halves, or a dash.
  */
 export function removedCell(s) {
   const watched = s.toRemove?.length || 0;
@@ -53,6 +117,9 @@ export function removedCell(s) {
  * The watched-ledger internals (which signal fired, the running total, how many
  * videos are being held out of re-adds) stay in the console summary; they were
  * five overlapping counts in a sentence here, describing the same few videos.
+ *
+ * @param {ReportRow} s - One playlist's summary.
+ * @returns {string} Comma-separated notes, starting with the action.
  */
 export function statusNote(s) {
   // `action` only tracks inserts, so a run that just pruned watched videos would
@@ -90,9 +157,19 @@ export function statusNote(s) {
 }
 
 /**
+ * Build the HTML report table shared by the workflow and the standalone email test.
+ *
  * `account` labels which YouTube account the playlists belong to. It is optional and
  * comes from configuration (ACCOUNT_LABEL), never a hard-coded address — this file is
  * public and the report is not.
+ *
+ * @param {ReportRow[]} summaries - One row per playlist (or per failed channel).
+ * @param {object} [options]
+ * @param {boolean} [options.dryRun=false] - Mark the report as a dry run in its heading.
+ * @param {string} [options.account=''] - Account label for the header line.
+ * @param {string} [options.warning=''] - Account-wide warning shown as a banner above
+ *   the table (the sync-marker conflict).
+ * @returns {string} A complete, UTF-8-declared HTML document.
  */
 export function buildHtml(summaries, { dryRun = false, account = '', warning = '' } = {}) {
   const now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';

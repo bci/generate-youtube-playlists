@@ -2,6 +2,15 @@
 // whole point of this file is proving the scanner rejects them, so weakening them to
 // example.com would delete the test. See allowsCheck() in checks.js.
 
+/**
+ * Tests for the pure rules in checks.js: the features.yaml manifest, the public-repo
+ * secret scan and its opt-out, must-be-ignored paths, line endings, links, the engines
+ * floor, bookkeeping, README coverage of checks and targets, shim drift and target
+ * argument spelling.
+ *
+ * @module test/checks
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -19,9 +28,17 @@ import {
   scanSecrets,
 } from '../checks.js';
 
+/**
+ * Only the error-level findings.
+ *
+ * @param {Array<{level: string}>} findings - What a check returned.
+ * @returns {Array<{level: string}>} The errors.
+ */
 const errors = (findings) => findings.filter((f) => f.level === 'error');
+/** A VERSIONS.md with one Unreleased and one released heading. */
 const VERSIONS = '# Versions\n\n## Unreleased — things\n\n## 2026.09.12 — the first release\n';
 
+/** A features.yaml that passes every manifest rule against {@link VERSIONS}. */
 const MANIFEST = `
 version: 1
 updated: 2026-09-15

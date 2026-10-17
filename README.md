@@ -792,7 +792,10 @@ npm test
 
 Uses Node's built-in test runner (`node --test`, no dependencies). Covers report building
 and sorting, quota detection, duration parsing, and the positional-insert logic (with a
-mocked YouTube client). `test/credentials.test.js` also verifies the real `.env` credentials
+mocked YouTube client) — and, file by file under `test/`, channel-line parsing, the
+`after=` cutoff, the Shorts modes, watched-video pruning and the ledger, the sync marker
+and unclaiming, the watchdog, `make.js`'s helpers and every rule in `checks.js`. The YouTube
+client is always a mock. `test/credentials.test.js` also verifies the real `.env` credentials
 authenticate — it refreshes a Google OAuth token and acquires a Microsoft Graph token (OAuth
 endpoints only; **no YouTube quota is consumed**). If a credential group is absent, that
 check is skipped so the pure unit tests still pass.
@@ -800,13 +803,17 @@ check is skipped so the pure unit tests still pass.
 ### Lint
 
 ```powershell
-npm run lint   # eslint .
+npm run lint   # eslint . --max-warnings=0
 ```
 
-### Pre-push hook (lint + tests)
+`make ci` is the full gate: lint, the tests and every `make check` rule, reporting all
+failures at once.
 
-A committed hook in `.githooks/pre-push` runs `npm run lint` then `npm test` and **blocks the
-push if either fails**. Enable it once per clone:
+### Pre-push hook (`make ci`)
+
+A committed hook in `.githooks/pre-push` runs `node make.js ci` — lint, the tests and every
+check — and **blocks the push if any of them fails**. Enable it once per clone (`make setup`
+does this for you):
 
 ```powershell
 git config core.hooksPath .githooks
@@ -816,7 +823,7 @@ git config core.hooksPath .githooks
 
 | Path                    | Purpose                                          |
 | ----------------------- | ------------------------------------------------ |
-| `src/index.js`          | CLI entry point + two-phase workflow             |
+| `src/index.js`          | CLI entry point + the phased workflow (read, remove, insert) |
 | `src/youtube.js`        | Channel resolve, uploads listing, playlist sync  |
 | `src/email.js`          | Microsoft Graph report sender                     |
 | `src/report.js`         | Shared HTML report builder                        |
@@ -833,6 +840,11 @@ git config core.hooksPath .githooks
 | `run-watchdog.sh`       | macOS LaunchDaemon wrapper for the watchdog       |
 | `launchd/*.plist`       | macOS LaunchDaemon templates (repo path + user are placeholders) |
 | `make.js`               | Task runner — every target, and their only implementation |
+| `checks.js`             | The rules behind `make check` / `make ci`         |
+| `eslint.config.js`      | ESLint flat config (`npm run lint`)               |
+| `.githooks/pre-push`    | Runs `make ci` before every push (opt-in per clone) |
+| `bootstrap.cmd`         | Double-click setup from a release kit on Windows  |
+| `test/*.test.js`        | `node:test` suites; YouTube is always mocked      |
 | `Makefile`              | Shim → `make.js`, so `make <target>` works (macOS)  |
 | `build.ps1`             | Shim → `make.js`, so `.\build.ps1 <target>` works (Windows) |
 | `config/channels.example.txt` | Tracked template for the channel list       |

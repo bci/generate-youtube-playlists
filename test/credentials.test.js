@@ -1,13 +1,20 @@
-// Credentials test: verifies that the secrets in .env are present AND actually
-// authenticate. These checks hit the OAuth token endpoints only (no YouTube Data
-// API quota is consumed). If a group of env vars is absent, that group is skipped
-// so the pure unit tests still pass on a fresh checkout.
+/**
+ * Credentials test: verifies that the secrets in .env are present AND actually
+ * authenticate. These checks hit the OAuth token endpoints only (no YouTube Data
+ * API quota is consumed). If a group of env vars is absent, that group is skipped
+ * so the pure unit tests still pass on a fresh checkout.
+ *
+ * The one test file that reaches the network (AGENTS.md, Conventions).
+ *
+ * @module test/credentials
+ */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** Repository root, where .env lives. */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 try {
   process.loadEnvFile(path.join(ROOT, '.env'));
@@ -15,8 +22,11 @@ try {
   // no .env — individual tests below will skip
 }
 
+/** Variables the Google token exchange needs. */
 const GOOGLE_VARS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'];
+/** Variables the Microsoft Graph token request needs. */
 const GRAPH_VARS = ['MS365_TENANT_ID', 'MS365_CLIENT_ID', 'MS365_CLIENT_SECRET'];
+/** Every variable a fully configured .env carries. */
 const ALL_VARS = [...GOOGLE_VARS, ...GRAPH_VARS, 'MS365_FROM_ADDRESS', 'REPORT_TO'];
 
 test('all required env vars are present in .env', (t) => {

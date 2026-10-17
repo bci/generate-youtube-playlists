@@ -1,3 +1,11 @@
+/**
+ * ESLint flat config: the recommended rules over every `.js` file as Node ESM, with
+ * unused variables and arguments allowed only when prefixed `_`. Run through
+ * `npm run lint` with `--max-warnings=0`.
+ *
+ * @module eslint.config
+ */
+
 import js from '@eslint/js';
 import globals from 'globals';
 

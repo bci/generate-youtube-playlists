@@ -18,6 +18,8 @@
  * A finding is { check, level: 'error' | 'warn', message }. Errors fail the build.
  * Warnings are printed and counted but do not, because a warning that blocks a push is
  * an error wearing a disguise, and the honest fix is to promote it.
+ *
+ * @module checks
  */
 
 import { spawnSync } from 'child_process';
@@ -26,15 +28,53 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
 
+/** Repository root (this file lives there). */
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * One problem a check found.
+ *
+ * @typedef {object} Finding
+ * @property {string} check - Short check name, e.g. `secrets`; each has a README row.
+ * @property {'error'|'warn'} level - Errors fail `make check`; warnings are only printed.
+ * @property {string} message - What is wrong, naming the file where there is one.
+ */
+
+/**
+ * A repository file with its text.
+ *
+ * @typedef {object} RepoFile
+ * @property {string} path - Path relative to the repository root, `/`-separated.
+ * @property {string} content - The file's UTF-8 text.
+ */
+
+/**
+ * Build an error finding.
+ *
+ * @param {string} check - Check name.
+ * @param {string} message - What is wrong.
+ * @returns {Finding} A finding at level `error`.
+ */
 const error = (check, message) => ({ check, level: 'error', message });
+/**
+ * Build a warning finding.
+ *
+ * @param {string} check - Check name.
+ * @param {string} message - What is wrong.
+ * @returns {Finding} A finding at level `warn`.
+ */
 const warn = (check, message) => ({ check, level: 'warn', message });
 
 // ---------------------------------------------------------------------------------
 // Gathering
 // ---------------------------------------------------------------------------------
 
+/**
+ * Run git in the repository root and capture its output.
+ *
+ * @param {string[]} args - Arguments to git.
+ * @returns {{ok: boolean, out: string, err: string}} Exit success and trimmed stdout/stderr.
+ */
 function git(args) {
   const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
@@ -45,12 +85,20 @@ function git(args) {
  * args array with shell:true is deprecated in current Node (DEP0190) and prints a warning
  * on every check run. A missing binary fails with ENOENT; a present one may exit non-zero
  * for an unknown flag, and that still answers the question.
+ *
+ * @param {string} cmd - Executable name.
+ * @returns {boolean} False only when spawning fails with ENOENT.
  */
 function has(cmd) {
   return spawnSync(cmd, ['--version'], { encoding: 'utf8' }).error?.code !== 'ENOENT';
 }
 
-/** Every tracked file, with its content. Binary and very large files are skipped. */
+/**
+ * Every tracked file, with its content. Binary and very large files are skipped.
+ *
+ * @returns {RepoFile[]} Tracked plus untracked-but-not-ignored text files under 2 MB;
+ *   empty when git cannot list the repository.
+ */
 export function trackedFiles() {
   // Tracked, plus untracked-but-not-ignored. The second half matters more than it looks:
   // git ls-files alone sees a new file only after it is committed, so a secret in a file
@@ -82,10 +130,17 @@ export function trackedFiles() {
 // The rules - pure, one exported function each
 // ---------------------------------------------------------------------------------
 
+/** The `status:` values features.yaml allows (AGENTS.md). */
 const STATUSES = ['planned', 'in-dev', 'in-test', 'complete', 'deferred'];
+/** The shape of a YYYY-MM-DD date. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** A real calendar date, not merely a well-shaped string. 2026-02-30 is neither. */
+/**
+ * A real calendar date, not merely a well-shaped string. 2026-02-30 is neither.
+ *
+ * @param {*} value - A YAML value (stringified first).
+ * @returns {boolean} True for a YYYY-MM-DD string naming a real day.
+ */
 function realDate(value) {
   if (!ISO_DATE.test(String(value))) return false;
   const d = new Date(`${value}T00:00:00Z`);
@@ -99,6 +154,10 @@ function realDate(value) {
  *
  * `source` is the raw text and `versions` the text of VERSIONS.md, so that `release:`
  * can be checked against the releases that actually exist.
+ *
+ * @param {string} source - features.yaml text.
+ * @param {string} versions - VERSIONS.md text.
+ * @returns {Finding[]} Every manifest problem found; one error when the YAML does not parse.
  */
 export function checkManifest(source, versions) {
   const found = [];
@@ -160,6 +219,11 @@ export function checkManifest(source, versions) {
 /**
  * Markdown links pointing at paths inside the repo. Documentation rot is a warning, not
  * a failure: a stale link misleads a reader, it does not break a run.
+ *
+ * @param {RepoFile[]} files - Files to scan; only `.md` files are read.
+ * @param {(rel: string) => boolean} [existsAt] - Whether a repo-relative path exists.
+ * @param {(rel: string) => boolean} [isIgnored] - Whether a repo-relative path is git-ignored.
+ * @returns {Finding[]} One warning per link to a missing, non-ignored path.
  */
 export function checkLinks(files, existsAt = (p) => fs.existsSync(path.join(ROOT, p)), isIgnored = () => false) {
   const found = [];
@@ -189,19 +253,11 @@ export function checkLinks(files, existsAt = (p) => fs.existsSync(path.join(ROOT
   return found;
 }
 
-// Addresses at these domains are documentation, not somebody's mailbox.
+/** Addresses at these domains are documentation, not somebody's mailbox. */
 const SAFE_MAIL = /@example\.(com|net|org)$/;
-// package-lock.json carries the npm maintainers' own addresses; it is generated, not written.
+/** package-lock.json carries the npm maintainers' own addresses; it is generated, not written. */
 const NOT_OURS = new Set(['package-lock.json']);
 
-/**
- * The public-repo scan (CLAUDE.md section 12). Errors, every one: a push is not
- * reversible, and a secret that reaches GitHub is a secret that has to be rotated
- * whether or not the commit is later removed.
- *
- * `handles` is the local channel list when there is one, so the check catches a real
- * channel name that wandered into a tracked example.
- */
 /**
  * A file may opt out of one check by saying so, with a reason.
  *
@@ -210,11 +266,28 @@ const NOT_OURS = new Set(['package-lock.json']);
  * purpose, and the alternative was to weaken the fixtures until they no longer proved
  * anything. The reason is mandatory — `checks-allow: secrets` on its own does not match —
  * so an exemption cannot be added silently.
+ *
+ * @param {string} content - The file's text.
+ * @param {string} check - Check name, e.g. `secrets`.
+ * @returns {boolean} True when the file carries `checks-allow: <check> — <reason>`.
  */
 export function allowsCheck(content, check) {
   return new RegExp(`checks-allow:\\s*${check}\\s*[-—:]\\s*\\S`).test(String(content));
 }
 
+/**
+ * The public-repo scan (CLAUDE.md section 12). Errors, every one: a push is not
+ * reversible, and a secret that reaches GitHub is a secret that has to be rotated
+ * whether or not the commit is later removed.
+ *
+ * `handles` is the local channel list when there is one, so the check catches a real
+ * channel name that wandered into a tracked example.
+ *
+ * @param {RepoFile[]} files - Files to scan.
+ * @param {string[]} [handles=[]] - Local channel handles, without `@`.
+ * @returns {Finding[]} One error per credential-shaped string, non-example address or
+ *   configured handle found.
+ */
 export function scanSecrets(files, handles = []) {
   const found = [];
   const patterns = [
@@ -249,7 +322,7 @@ export function scanSecrets(files, handles = []) {
   return found;
 }
 
-/** Files that must never be tracked, however tempting. */
+/** Paths that must never be tracked, however tempting. */
 const MUST_BE_IGNORED = [
   /^\.env$/,
   /^\.env\./,
@@ -263,6 +336,12 @@ const MUST_BE_IGNORED = [
   /^\.agent-pipe\//,
 ];
 
+/**
+ * Files that are tracked (or about to be) but must stay ignored.
+ *
+ * @param {RepoFile[]} files - Files to check; `.env.example` is always allowed.
+ * @returns {Finding[]} One error per offending path.
+ */
 export function checkIgnored(files) {
   return files
     .filter((f) => MUST_BE_IGNORED.some((re) => re.test(f.path)) && f.path !== '.env.example')
@@ -273,6 +352,9 @@ export function checkIgnored(files) {
  * Line endings, for the three kinds .gitattributes pins. A CRLF shell wrapper fails as
  * `/bin/sh^M: bad interpreter` and a CRLF Makefile runs `node make.js version\r` - both
  * report a missing command rather than a line ending, and both fail unattended.
+ *
+ * @param {RepoFile[]} files - Files to check.
+ * @returns {Finding[]} One error per `.sh`, `.plist` or Makefile containing CRLF.
  */
 export function checkEndings(files) {
   return files
@@ -288,6 +370,9 @@ export function checkEndings(files) {
  *
  * A warning rather than an error: a genuine one-line typo fix should not be blocked, and
  * a check that blocks legitimate work is a check people learn to bypass.
+ *
+ * @param {string[]} changed - Paths changed against the upstream branch.
+ * @returns {Finding[]} At most one warning, naming the books that were not touched.
  */
 export function checkBookkeeping(changed) {
   const code = changed.filter((p) => /^(src\/|test\/)/.test(p) || ['make.js', 'checks.js', 'Makefile', 'build.ps1'].includes(p));
@@ -303,7 +388,13 @@ export function checkBookkeeping(changed) {
   ];
 }
 
-/** Node against the engines floor, and a lockfile that exists. */
+/**
+ * Node against the engines floor.
+ *
+ * @param {{engines?: {node?: string}}} pkg - Parsed package.json.
+ * @param {string} [version=process.version] - Node version to test, e.g. `v20.12.0`.
+ * @returns {Finding[]} A warning when no floor is declared, an error when below it.
+ */
 export function checkEngines(pkg, version = process.version) {
   const found = [];
   const floor = pkg.engines?.node;
@@ -332,6 +423,10 @@ export function checkEngines(pkg, version = process.version) {
  * list is one more thing to forget to update - which is the defect, not the fix. Scanning
  * has its own failure mode, though: a regex that silently matches nothing would report a
  * clean bill forever, so finding no names at all is itself a finding.
+ *
+ * @param {string} source - checks.js text.
+ * @param {string} readme - README.md text.
+ * @returns {Finding[]} One warning per undocumented check; an error if none were found.
  */
 export function checkDocumentedChecks(source, readme) {
   const names = [...new Set([...String(source).matchAll(/\b(?:error|warn)\(\s*'([a-z-]+)'/g)].map((m) => m[1]))];
@@ -346,7 +441,13 @@ export function checkDocumentedChecks(source, readme) {
     .map((name) => warn('docs', `check "${name}" has no row in the README check table`));
 }
 
-/** Every target `make help` prints should be findable in the README. */
+/**
+ * Every target `make help` prints should be findable in the README.
+ *
+ * @param {string[]} targetNames - Every target name.
+ * @param {string} readme - README.md text.
+ * @returns {Finding[]} One warning per target not written as `` `name` `` in the README.
+ */
 export function checkDocumentedTargets(targetNames, readme) {
   return targetNames
     .filter((name) => !new RegExp(`\`${name}[\`,]`).test(readme))
@@ -358,6 +459,10 @@ export function checkDocumentedTargets(targetNames, readme) {
  * it. An error, not a warning: a stale list is a menu that lies about what exists, which
  * is the failure the generated block was added to prevent - four separate reports of
  * "I do not see target X" for targets that were already there.
+ *
+ * @param {Object<string, string>} expected - File name -> content the registry implies.
+ * @param {Object<string, string|undefined>} current - File name -> content on disk.
+ * @returns {Finding[]} One error per shim whose block is missing or stale.
  */
 export function checkShims(expected, current) {
   const found = [];
@@ -379,6 +484,9 @@ export function checkShims(expected, current) {
  * a leading `--`, which make claims as its own option. Both were found the hard way, by
  * `change-run-time 04:30` and by `run --max=1`, so this keeps them from being reintroduced
  * in a new target's argument spec where the same discovery would have to happen again.
+ *
+ * @param {Array<{name: string, args?: string}>} targets - The make.js target registry.
+ * @returns {Finding[]} One error per colon or `--` found in a target's `args`.
  */
 export function checkTargetArgs(targets) {
   const found = [];
@@ -400,6 +508,11 @@ export function checkTargetArgs(targets) {
 // The impure checks - external tools, used only when they are there
 // ---------------------------------------------------------------------------------
 
+/**
+ * Lint every launchd plist with `plutil -lint` (macOS only).
+ *
+ * @returns {Finding[]} An error per invalid plist, or one warning when plutil is absent.
+ */
 function checkPlists() {
   // plutil is macOS-only. A malformed plist is rejected by launchd at bootstrap with a
   // message about the path, so catching it here is worth the platform-specific branch.
@@ -413,6 +526,11 @@ function checkPlists() {
   return found;
 }
 
+/**
+ * Run shellcheck over the top-level `.sh` wrappers, as POSIX sh.
+ *
+ * @returns {Finding[]} One warning carrying shellcheck's output, or one when it is absent.
+ */
 function checkShell() {
   if (!has('shellcheck')) return [warn('shell', 'shellcheck not available; wrappers not checked')];
   const scripts = fs.readdirSync(ROOT).filter((f) => f.endsWith('.sh'));
@@ -424,6 +542,11 @@ function checkShell() {
   return [warn('shell', `shellcheck found issues:\n${(r.stdout || r.stderr).trim()}`)];
 }
 
+/**
+ * Summarize `npm audit`. Needs the npm registry; offline is a warning, not a failure.
+ *
+ * @returns {Finding[]} One warning listing vulnerability counts, or none when clean.
+ */
 function checkAudit() {
   // A command string with shell:true rather than an args array, for the same DEP0190
   // reason as has(); npm on Windows is a .cmd and cannot be spawned without a shell.
@@ -444,7 +567,12 @@ function checkAudit() {
 // Orchestration
 // ---------------------------------------------------------------------------------
 
-/** The channel handles configured locally, so the secret scan knows what to look for. */
+/**
+ * The channel handles configured locally, so the secret scan knows what to look for.
+ *
+ * @returns {string[]} Handles from config/channels.txt without `@`; empty when there is
+ *   no file.
+ */
 function localHandles() {
   try {
     return fs
@@ -459,7 +587,11 @@ function localHandles() {
   }
 }
 
-/** What has changed against the upstream branch, working tree included. */
+/**
+ * What has changed against the upstream branch, working tree included.
+ *
+ * @returns {?string[]} Changed and untracked paths, or null when there is no upstream.
+ */
 function changedPaths() {
   const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
   if (!upstream.ok) return null; // no upstream: nothing to compare a push against
@@ -469,11 +601,22 @@ function changedPaths() {
   return [...new Set([...diff.out.split('\n'), ...staged.out.split('\n')].filter(Boolean))];
 }
 
-/** Is this path git-ignored? Only consulted for links that are already missing. */
+/**
+ * Is this path git-ignored? Only consulted for links that are already missing.
+ *
+ * @param {string} rel - Repo-relative path.
+ * @returns {boolean} True when `git check-ignore` matches it.
+ */
 function gitIgnores(rel) {
   return spawnSync('git', ['check-ignore', '-q', rel], { cwd: ROOT }).status === 0;
 }
 
+/**
+ * Read a repo-relative file.
+ *
+ * @param {string} p - Repo-relative path.
+ * @returns {string} Its text, or '' when it cannot be read.
+ */
 const read = (p) => {
   try {
     return fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -482,6 +625,16 @@ const read = (p) => {
   }
 };
 
+/**
+ * Gather the repository and run every check. Nothing short-circuits.
+ *
+ * @param {object} [context] - What only make.js knows.
+ * @param {string[]} [context.targetNames=[]] - Every target name, for the README check.
+ * @param {Array<{name: string, args?: string}>} [context.targets=[]] - The target registry.
+ * @param {?{expected: Object<string, string>, current: Object<string, string>}} [context.shims=null] -
+ *   Shim contents, expected and actual; the shim check is skipped when null.
+ * @returns {Promise<Finding[]>} Every finding, errors and warnings mixed.
+ */
 export async function runAllChecks({ targetNames = [], targets = [], shims = null } = {}) {
   const files = trackedFiles();
   const changed = changedPaths();

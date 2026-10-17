@@ -1,3 +1,11 @@
+/**
+ * Tests for deleting watched videos: applyRemovals (ceilings, quota, `--unlike`), the
+ * prune / report / ignore flags, how removals read in the report and console, and the
+ * guarantee that a known-watched video is never re-added under any flag combination.
+ *
+ * @module test/prune
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -9,6 +17,14 @@ import {
 import { parseArgs, summaryLine } from '../src/index.js';
 import { buildHtml } from '../src/report.js';
 
+/**
+ * A client that records deletions and rating changes.
+ *
+ * @param {object} [options]
+ * @param {number} [options.quotaAfterDeletes=Infinity] - Fail with quotaExceeded once
+ *   this many deletes have succeeded.
+ * @returns {object} A mock client exposing the `deleted` and `rated` arrays.
+ */
 function mockYoutube({ quotaAfterDeletes = Infinity } = {}) {
   const deleted = [];
   const rated = [];
@@ -35,6 +51,11 @@ function mockYoutube({ quotaAfterDeletes = Infinity } = {}) {
   };
 }
 
+/**
+ * A playlist status with two liked, watched videos queued for removal and one other.
+ *
+ * @returns {object} A minimal status object for applyRemovals.
+ */
 function makeStatus() {
   const toRemove = [
     { videoId: 'a', title: 'a', playlistItemId: 'ITEM_A', liked: true },
@@ -140,6 +161,12 @@ test('--report-watched is not --prune-watched', () => {
   assert.equal(o.dryRun, false, 'report mode must still let adds run');
 });
 
+/**
+ * A report row for an up-to-date ten-video playlist.
+ *
+ * @param {object} over - Fields to override.
+ * @returns {object} The row.
+ */
 const reportRow = (over) => ({
   handle: '@A',
   playlistTitle: 'A',
@@ -267,6 +294,11 @@ test('applyInserts never re-adds videos that applyRemovals just pruned', async (
  * Minimal YouTube stub for the phase-1 reads: one channel with two uploads, one of
  * which is already in the playlist. `classifyShorts: false` keeps the duration
  * lookup and the Shorts URL probe (real HTTP) out of the test.
+ *
+ * @param {object} fixture
+ * @param {Array<object>} fixture.uploads - Upload playlist items to return.
+ * @param {string[]} fixture.inPlaylist - Video ids already in the channel's playlist.
+ * @returns {object} A read-only mock client.
  */
 function stubYouTube({ uploads, inPlaylist }) {
   return {

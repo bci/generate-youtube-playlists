@@ -1,10 +1,25 @@
+/**
+ * `npm run watchdog` entry point: alerts when the nightly sync has gone quiet.
+ *
+ * Runs on its own schedule, six hours after the sync, and reads the heartbeat the sync
+ * writes (see {@link module:heartbeat}). It mails ERROR_ALERT_TO (falling back to
+ * REPORT_TO) only when the heartbeat is stale; a healthy night produces no mail.
+ *
+ * Flags: `--dry-run` (decide, but send nothing) and `--max-age-hours=N` (default 36).
+ *
+ * @module watchdog
+ */
+
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { sendReport } from './email.js';
 import { readHeartbeat, checkStale, buildAlertHtml } from './heartbeat.js';
 
+/** Directory holding this module (`src/`). */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Repository root. */
 const ROOT = path.resolve(__dirname, '..');
+/** Where the heartbeat lives. */
 const STATE_DIR = path.join(ROOT, 'state');
 
 try {
@@ -13,10 +28,20 @@ try {
   // No .env — sending will fail with a clear message if an alert is actually due.
 }
 
-// Same rule as the sync: the operator's address is configuration, not source.
+/** Same rule as the sync: the operator's address is configuration, not source. */
 const ALERT_TO = process.env.ERROR_ALERT_TO || process.env.REPORT_TO;
+/** Subject line of the alert mail. */
 const ALERT_SUBJECT = 'YouTube playlist sync has not run';
 
+/**
+ * Parse the watchdog's command line.
+ *
+ * Unknown flags and an unparseable `--max-age-hours` are warned about and ignored, not
+ * fatal: the watchdog must still run to say the sync is quiet.
+ *
+ * @param {string[]} argv - Arguments after the script name.
+ * @returns {{maxAgeHours: number, dryRun: boolean}} The options, with defaults applied.
+ */
 export function parseWatchdogArgs(argv) {
   const opts = { maxAgeHours: 36, dryRun: false };
   for (const arg of argv) {
@@ -35,6 +60,11 @@ export function parseWatchdogArgs(argv) {
 /**
  * Alert only when the sync has gone quiet. Silence stays silent — the point is to
  * page on the absence of runs, not to add mail whose absence has to be noticed.
+ *
+ * Sets `process.exitCode` to 1 when an alert is due but no recipient is configured, or
+ * when the alert could not be sent.
+ *
+ * @returns {Promise<void>}
  */
 async function main() {
   const opts = parseWatchdogArgs(process.argv.slice(2));
@@ -70,6 +100,7 @@ async function main() {
   }
 }
 
+/** True when this file is the process entry point rather than imported by a test. */
 const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
