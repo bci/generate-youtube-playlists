@@ -110,6 +110,8 @@ export async function runAuthFlow() {
   }
 
   // local-auth needs a client secret file on disk; write a temp one from env.
+  // Owner-only (0600): it holds the client secret, and on Linux os.tmpdir() is a shared
+  // /tmp where the default mode would let any local user read it. (No effect on Windows.)
   const tmp = path.join(os.tmpdir(), `yt-oauth-${process.pid}.json`);
   await fs.writeFile(
     tmp,
@@ -121,7 +123,8 @@ export async function runAuthFlow() {
         token_uri: 'https://oauth2.googleapis.com/token',
         redirect_uris: ['http://localhost'],
       },
-    })
+    }),
+    { mode: 0o600 }
   );
 
   try {

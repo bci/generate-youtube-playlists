@@ -396,3 +396,23 @@ test('a failed un-like does not abandon the remaining deletions', async () => {
   assert.equal(st.unliked, 0);
   assert.equal(st.quotaHit, false);
 });
+
+test('applyRemovals does not retry a delete YouTube rejected for good', async () => {
+  // CLAUDE.md section 11: a permanent 4xx will never come good, and every attempt is
+  // charged. This used to be retried four more times, with 1+2+3+4 seconds of waiting.
+  let calls = 0;
+  const yt = {
+    playlistItems: {
+      delete: async () => {
+        calls++;
+        const e = new Error('Playlist item not found.');
+        e.response = { status: 404, data: { error: { errors: [{ reason: 'playlistItemNotFound' }] } } };
+        throw e;
+      },
+    },
+  };
+  const st = makeStatus();
+  await assert.rejects(applyRemovals(yt, st, {}), /not found/);
+  assert.equal(calls, 1, 'one attempt, no retries');
+  assert.equal(st.removed, 0);
+});

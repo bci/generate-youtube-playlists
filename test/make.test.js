@@ -195,6 +195,14 @@ test('setEnvValue appends a key that is not there yet', () => {
   assert.equal(setEnvValue('', 'SYNC_AT', '03:00'), 'SYNC_AT=03:00\n');
 });
 
+test('setEnvValue stores a value containing $ literally', () => {
+  // String.replace reads `$&`, `$1` and `$'` in a replacement string as patterns, so a
+  // value carrying one was rewritten into something else on its way into .env.
+  const before = 'REPORT_TO=old@example.com\n';
+  assert.equal(setEnvValue(before, 'REPORT_TO', 'a$&b@example.com'), 'REPORT_TO=a$&b@example.com\n');
+  assert.equal(setEnvValue(before, 'REPORT_TO', 'x$1y@example.com'), 'REPORT_TO=x$1y@example.com\n');
+});
+
 test('setEnvValue keeps CRLF files on CRLF', () => {
   assert.equal(setEnvValue('A=1\r\n', 'B', '2'), 'A=1\r\nB=2\r\n');
 });

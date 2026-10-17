@@ -4,7 +4,21 @@ Version strings follow the format `YYYY.MM.DD-<commitID>`. There is no build ste
 project, so the version is documentary — it names the commit a deployment came from, and
 `package.json` keeps a plain semver for tooling.
 
-## Unreleased — documentation pass
+## Unreleased — documentation pass and code-review fixes
+
+**Permanent API errors are no longer retried.** A 400 or 404 on a playlist insert, a
+delete or an un-like now ends that call at once, as CLAUDE.md section 11 always said it
+should. Before, it was retried four more times, each attempt charged, with 10 seconds of
+backoff (FEAT-0001, FEAT-0004).
+
+**Smaller fixes:**
+- `make change-email` and `change-run-time` now store a value containing `$` literally
+  (FEAT-0011, FEAT-0014).
+- `make check` now sees files whose names are not ASCII, the secret scan included
+  (FEAT-0013).
+- The temporary OAuth client file written during `authorize` is owner-only.
+
+Review notes and open questions: `docs/code-review/2026-10-16.md`.
 
 **Every declaration documented.** JSDoc on every module, function, method, class and
 module-level constant, comment-based help in `build.ps1` that `Get-Help` can now actually

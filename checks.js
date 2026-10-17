@@ -105,11 +105,15 @@ export function trackedFiles() {
   // added this session would pass every check and be caught by the commit after the one
   // that leaked it. Found by committing test/checks.test.js and watching eight planted
   // fixtures appear for the first time.
-  const listed = git(['ls-files']);
-  const untracked = git(['ls-files', '--others', '--exclude-standard']);
+  //
+  // -z because without it git quotes any path with a non-ASCII byte ("test/\303\274.txt"),
+  // the quoted form names no file on disk, and statSync below skipped it - so a file with
+  // an accented name escaped every check, the secret scan included.
+  const listed = git(['ls-files', '-z']);
+  const untracked = git(['ls-files', '-z', '--others', '--exclude-standard']);
   if (!listed.ok) return [];
   const out = [];
-  const all = [...listed.out.split('\n'), ...(untracked.ok ? untracked.out.split('\n') : [])];
+  const all = [...listed.out.split('\0'), ...(untracked.ok ? untracked.out.split('\0') : [])];
   for (const rel of all.filter(Boolean)) {
     const full = path.join(ROOT, rel);
     let stat;
@@ -597,8 +601,8 @@ function changedPaths() {
   if (!upstream.ok) return null; // no upstream: nothing to compare a push against
   const diff = git(['diff', '--name-only', upstream.out]);
   if (!diff.ok) return null;
-  const staged = git(['ls-files', '--others', '--exclude-standard']);
-  return [...new Set([...diff.out.split('\n'), ...staged.out.split('\n')].filter(Boolean))];
+  const untracked = git(['ls-files', '--others', '--exclude-standard']);
+  return [...new Set([...diff.out.split('\n'), ...untracked.out.split('\n')].filter(Boolean))];
 }
 
 /**
