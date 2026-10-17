@@ -308,6 +308,39 @@ another. Twenty minutes later you've changed 15 files and you're not sure what y
 out to do. If a fix is cascading, stop. Tell the user what's happening. Get buy-in before
 continuing.
 
+## 11. Documentation and Readable Code
+
+Document code **completely**, in the standard its own language's tools read: every file,
+type, function, method and property, private ones included. Write it with the code, not
+afterwards. A summary line comes first. Then the *why*, which is the part a reader can't
+recover from the code. Then parameters, return value and errors, in that standard's own
+syntax.
+
+| Language | Standard | What "complete" means |
+| --- | --- | --- |
+| Go | **GoDoc** | A package comment. Every identifier has a comment starting with its name. `go doc` reads them. |
+| Swift | **Apple DocC** | `///` on every declaration. `- Parameters:` / `- Returns:` / `- Throws:`. ``` ``Symbol`` ``` links. A `.docc` catalog. `xcodebuild docbuild` with no warnings. |
+| PHP | **PHPDoc** (PSR-5 / PSR-19 tags) | A `/** */` file docblock, and one on every class, interface, trait, function, method, property and constant. `@param` and `@return` with types, `@throws`. phpDocumentor reads them. |
+| JavaScript / TypeScript | **JSDoc** | `/** */` on every module (`@module`), class, function and exported constant. `@param {type}`, `@returns {type}`, `@throws`, and `@typedef` for object shapes. |
+| PowerShell | **Microsoft comment-based help** | `<# .SYNOPSIS .DESCRIPTION .PARAMETER <name> .EXAMPLE .INPUTS .OUTPUTS .NOTES #>` at the top of every script and inside every function, so `Get-Help <script> -Full` works. Use approved verbs and `[CmdletBinding()]`. |
+| bash, zsh, sh and other Unix shells | **Google Shell Style Guide** | A file header saying what the script does. Every function has a comment block with `Globals:`, `Arguments:`, `Outputs:` and `Returns:`. `# TODO(name):` for open work. Plus the guide's style rules (`[[ ]]`, quoting, `local`, `main` at the bottom). |
+
+A language not listed uses its ecosystem's standard tool format (Python: PEP 257 docstrings).
+When a repo's own rules pick a different standard, the repo wins.
+
+**Readable by default: no compression, minification or obfuscation.** Source, scripts,
+configs and *shipped* files stay human-readable unless Kent asks otherwise for that
+artifact:
+
+- no minified JavaScript or CSS;
+- no packed or uglified bundles;
+- no base64-wrapped or obfuscated scripts;
+- no one-line JSON where a person might read it;
+- no stripped comments.
+
+A build tool's minified output is acceptable only where the readable source sits beside
+it in the repo and is what gets edited. Say so when that happens.
+
 <!-- CLAUDE-CORE:END v1 -->
 
 ## 11. This Tool Spends Quota and Edits a Real Account
