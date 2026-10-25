@@ -457,3 +457,79 @@ you need an answer before it is safe to proceed, ask Kent -- he is present and r
 
 **Nothing secret goes in a message.** Gitignored is not gone; §12 applies here exactly as it
 does to a tracked file.
+
+<!-- CLAUDE-PROFILE:bookkeeping:BEGIN v1 -->
+<!-- Managed by bci/claude-config (profiles/bookkeeping.md). Edit there, not here. -->
+
+## The Bookkeeping Is Part of the Change
+
+Four files describe this project to whoever arrives later, and they are wrong the moment a
+change lands without them:
+
+- `WORKLOG.md`: what was done, and **why**;
+- `VERSIONS.md`: what shipped;
+- `features.yaml`: what exists and what is planned, under stable `FEAT-NNNN` ids;
+- `ISSUES.md`: what is wrong or undecided, and still open.
+
+Updating them is **part of the work, not a follow-up task**.
+
+**Write the why, not the what.** The diff already shows what changed. The reasoning — the
+failure that motivated a guard, the cheaper approach that was rejected and why — is the part
+that cannot be recovered later, and it is the whole point of the file.
+
+**`complete` means it works, not that it shipped.** A feature that merged and fails on real
+input is `in-dev`, with the failure in `notes:`, however finished it looked in the PR. If you
+are tempted to round a measured failure up to `complete`, that is exactly the case this rule
+was written for.
+
+**Never renumber a `FEAT-NNNN`.** Ids are referenced from prompts, commit messages and other
+repos' manifests. A new feature takes the next free id.
+
+**An entry that lies is worse than no entry**, because it is the thing people trust *instead
+of* looking. A feature marked `complete` with a real limitation in `notes:` is honest; one
+marked `complete` that quietly is not, is not.
+
+If a change is too small to be worth a worklog entry, it is small enough that saying so in
+one line costs nothing. Do that rather than skipping silently.
+
+### `ISSUES.md`: open problems and pending decisions
+
+A finding that is not fixed in the same change goes in `ISSUES.md`. That covers a bug found
+while doing something else, a gap a review turned up, or a decision only the owner can make.
+Without it, open items scatter across worklog entries, turnovers and chat. Then the next
+session has no single place to ask "what is still wrong?", and an item found twice gets
+investigated twice.
+
+**It is written in the same change that finds or closes the issue.** The skeleton is
+`templates/ISSUES.md` in bci/claude-config.
+
+**The format:**
+
+- **Order:** newest first, one `##` entry per issue.
+- **Heading:** `## <STATUS> — <the problem in one line>`, where the status is `OPEN`,
+  `RESOLVED` or `WONTFIX`.
+- **Fields:**
+  - **Date:** the day it was found (ISO 8601).
+  - **Area:** the files, components or documents it concerns.
+  - **Severity:**
+    - `HIGH`: wrong now, enforceable now, or has a fixed date;
+    - `MEDIUM`: a real gap with no immediate clock;
+    - `LOW`: tidy-up.
+  - **Issue:** what is wrong, as observed. Quote the text or show the output.
+  - **Source:** where it was found and how it was verified ("read in the PDF by …", "test
+    reproduces it", "relayed, not re-checked"). The same evidence rule as everywhere else.
+  - **Options:** what could be done. Name **who decides** when it is not the agent's call.
+- **Closing:** a closed issue keeps its entry and gains `- **Resolved <date>:** …` or
+  `- **Won't fix <date>:** …`, giving the outcome and the commit or `FEAT-NNNN` that closed it.
+  Never delete a closed entry; what was decided and why is the record.
+
+**Where an item belongs:**
+
+- **A feature's known limitation** stays in `features.yaml` `notes:`. Add an issue only when
+  someone has to act on it.
+- **The reasoning behind a fix** goes in `WORKLOG.md`. The issue links to it rather than
+  repeating it.
+- **A repo with nothing open** still keeps the file, saying "Nothing open". An empty file says
+  someone looked; a missing one says nothing.
+
+<!-- CLAUDE-PROFILE:bookkeeping:END v1 -->

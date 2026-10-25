@@ -2,6 +2,16 @@
 
 Newest first. Absolute dates only.
 
+## 2026-10-24
+
+### ISSUES.md added (bookkeeping profile)
+
+- Kent made `ISSUES.md` the fourth bookkeeping file (claude-config FEAT-0024). It was
+  seeded from what this repo already records as open: 2 entries, each citing its
+  source. Nothing was invented.
+- The bookkeeping block in `CLAUDE.md` was re-synced from claude-config.
+- The bookkeeping profile was added to `CLAUDE.md` (Kent, 2026-10-24); the repo already kept WORKLOG, VERSIONS and features.yaml.
+
 ## 2026-10-16
 
 ### Documentation pass: every declaration documented, no code changed
