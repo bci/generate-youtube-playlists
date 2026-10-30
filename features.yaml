@@ -31,7 +31,7 @@
 # the date each feature was originally written.
 
 version: 1
-updated: 2026-09-15
+updated: 2026-10-16
 
 components:
   - id: core
@@ -56,9 +56,9 @@ features:
       are idempotent.
     components: [core, qa]
     status: complete
-    release: 2026.09.12
+    release: Unreleased
     added: 2026-09-12
-    updated: 2026-09-12
+    updated: 2026-10-16
     notes: >
       Two-phase by design - read every channel before writing anything - so a mid-run
       quota stop still produces a truthful report. Inserts run smallest-backlog-first.
@@ -101,9 +101,9 @@ features:
       Watched playlist that the tool only ever reads.
     components: [core, qa]
     status: complete
-    release: 2026.09.12
+    release: Unreleased
     added: 2026-09-12
-    updated: 2026-09-12
+    updated: 2026-10-16
     notes: >
       YouTube exposes no watch history, so these signals are the substitute. The ledger
       is permanent by design - a delete without a memory becomes a delete/re-add loop at
@@ -261,9 +261,9 @@ features:
       with no target prints the generated list.
     components: [tooling, ops, qa]
     status: complete
-    release: 2026.09.15-84b809c
+    release: Unreleased
     added: 2026-09-15
-    updated: 2026-09-15
+    updated: 2026-10-16
     notes: >
       Built 2026-09-15. The alternative considered and rejected was a Makefile and a
       build.ps1 each carrying its own implementation: that writes every target twice, in
@@ -345,9 +345,9 @@ features:
       reports all failures at once rather than stopping at the first.
     components: [tooling, qa, ops]
     status: complete
-    release: 2026.09.15-84b809c
+    release: Unreleased
     added: 2026-09-15
-    updated: 2026-09-15
+    updated: 2026-10-16
     notes: >
       Two guardrails this repo states but nothing enforced now have teeth. CLAUDE.md section
       12 (no addresses, ids or channel names in tracked files) is checked on every tracked
@@ -403,9 +403,9 @@ features:
       are reinstalled so the scheduler picks the change up.
     components: [tooling, ops, qa]
     status: complete
-    release: 2026.09.15-84b809c
+    release: Unreleased
     added: 2026-09-15
-    updated: 2026-09-15
+    updated: 2026-10-16
     notes: >
       The watchdog moves with the sync rather than staying at 09:00, because the six-hour gap
       is the watchdog's whole purpose - on the sync's own schedule it is silent in exactly

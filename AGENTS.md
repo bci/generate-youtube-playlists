@@ -182,7 +182,8 @@ proposes). In short:
 
 ## Not done yet
 
-Facts, as of 2026-10-16:
+Facts, as of 2026-10-16. Open questions from that day's review are in
+[docs/code-review/2026-10-16.md](docs/code-review/2026-10-16.md).
 
 - **Scheduling knows macOS and Windows only.** `install`, `status`, `uninstall` and
   `run-now` refuse any other platform; elsewhere, schedule `run-sync.sh` yourself.

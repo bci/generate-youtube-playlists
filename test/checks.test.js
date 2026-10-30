@@ -13,6 +13,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   checkBookkeeping,
   checkDocumentedChecks,
@@ -26,6 +29,7 @@ import {
   checkShims,
   checkTargetArgs,
   scanSecrets,
+  trackedFiles,
 } from '../checks.js';
 
 /**
@@ -268,4 +272,19 @@ test('scanSecrets still fires on a file that has not opted out', () => {
   assert.equal(found.length, 1);
   const exempt = scanSecrets([{ path: 'new.md', content: '// checks-allow: secrets — fixture\nreal@acme.co' }]);
   assert.deepEqual(exempt, []);
+});
+
+test('trackedFiles sees a file whose name is not ASCII', () => {
+  // git quotes such paths ("test/\303\274...") unless asked for NUL-separated output, and
+  // a quoted path does not exist on disk - so the file silently escaped every scan,
+  // the secret scan included.
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const name = `tmp-n\u00e4me-${process.pid}.txt`;
+  const full = path.join(dir, name);
+  fs.writeFileSync(full, 'probe\n');
+  try {
+    assert.ok(trackedFiles().some((f) => f.path === `test/${name}`));
+  } finally {
+    fs.rmSync(full, { force: true });
+  }
 });

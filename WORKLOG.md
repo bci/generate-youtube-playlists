@@ -14,6 +14,34 @@ Newest first. Absolute dates only.
 
 ## 2026-10-16
 
+### Code review: four small bugs fixed, ten questions left for Kent
+
+A senior-engineer read of all first-party code, done unattended on branch `code-review`
+after the documentation pass below. The full write-up, with file:line references and
+recommendations, is [docs/code-review/2026-10-16.md](docs/code-review/2026-10-16.md).
+What was fixed, and why each fix is safe to make without Kent present:
+
+- **Writes retried on permanent 400/404s** (`src/youtube.js`). CLAUDE.md section 11 already
+  said these are fatal. The code declared only quota errors fatal, so a dead video id cost
+  five attempts and ten seconds of backoff. The outcome was the same either way (the error
+  is thrown and the channel is reported), so making them fatal changes nothing but the
+  waste. 409 was deliberately left retryable, because YouTube sometimes returns it
+  transiently on concurrent playlist edits. 403 was left to `isQuotaError`, which owns
+  that status's quota reasons.
+- **`setEnvValue` and `$`** (`make.js`). A string replacement treats `$&` as "the match",
+  so a value containing one was rewritten on the way into .env. A replacer function
+  stores it literally.
+- **`trackedFiles()` and non-ASCII names** (`checks.js`). git quotes such paths unless
+  given `-z`, the quoted path does not exist on disk, and the file was skipped without a
+  message. That is the worst place for it: the public-repo secret scan is the check that
+  must not miss a file.
+- **The OAuth temp file** (`src/auth.js`) holds the client secret and is now created 0600.
+
+Each bug fix has a test that failed first (the retry case took 10 s and 5 attempts before
+the fix). Behaviour changes that would have been reasonable but are Kent's call are listed
+as questions, not made. The most important two: `.claude/launch.json` would start a full
+**live** sync, and `--max=abc` silently means unlimited.
+
 ### Documentation pass: every declaration documented, no code changed
 
 CLAUDE.md gained core section 11 on 2026-10-13 ("document code completely, in the standard

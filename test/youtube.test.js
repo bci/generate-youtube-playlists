@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   isQuotaError,
   isManualSortError,
+  isPermanentError,
   playlistUrl,
   parseISODuration,
   applyInserts,
@@ -222,4 +223,29 @@ test('applyInserts appends (and flags) when the playlist is not manually sorted'
   assert.equal(yt.refusedCount(), 1, 'only the first video pays for a refused positional call');
   assert.equal(st.action, 'updated');
   assert.equal(st.quotaHit, false);
+});
+
+test('applyInserts does not retry an insert YouTube rejected for good', async () => {
+  let calls = 0;
+  const yt = {
+    playlistItems: {
+      insert: async () => {
+        calls++;
+        const e = new Error('Video not found.');
+        e.response = { status: 404, data: { error: { errors: [{ reason: 'videoNotFound' }] } } };
+        throw e;
+      },
+    },
+  };
+  await assert.rejects(applyInserts(yt, makeStatus(), {}), /not found/);
+  assert.equal(calls, 1, 'one attempt, no retries');
+});
+
+test('isPermanentError: 400 and 404 are final, quota and 5xx are not its business', () => {
+  const withStatus = (status) => ({ response: { status } });
+  assert.equal(isPermanentError(withStatus(400)), true);
+  assert.equal(isPermanentError(withStatus(404)), true);
+  assert.equal(isPermanentError(withStatus(500)), false);
+  assert.equal(isPermanentError(withStatus(403)), false);
+  assert.equal(isPermanentError(new Error('ECONNRESET')), false);
 });

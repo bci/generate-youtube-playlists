@@ -107,6 +107,22 @@ export function isQuotaError(err) {
 }
 
 /**
+ * True if the API rejected a request for good: 400 (bad request) or 404 (not found).
+ *
+ * CLAUDE.md section 11 declares permanent 4xx errors fatal to a write's retry loop: they
+ * cannot come good, and every attempt is charged. Only these two statuses, on purpose —
+ * 403 carries the quota reasons (handled by {@link isQuotaError}) and 409 is sometimes
+ * transient on concurrent playlist edits, so neither is claimed here.
+ *
+ * @param {*} err - Anything thrown by a googleapis call.
+ * @returns {boolean} True for an HTTP 400 or 404 response.
+ */
+export function isPermanentError(err) {
+  const status = err?.response?.status;
+  return status === 400 || status === 404;
+}
+
+/**
  * True if YouTube refused a positional insert because the playlist is not on
  * "Manual" sorting. Picking any other sort order in the YouTube UI ("Date added",
  * "Most popular", ...) makes every insert that carries a position fail.
@@ -937,7 +953,7 @@ export async function applyRemovals(youtube, status, opts = {}) {
     if (status.removed >= maxRemovals) break;
     try {
       await withRetry(() => removeFromPlaylist(youtube, item.playlistItemId), {
-        isFatal: isQuotaError,
+        isFatal: (err) => isQuotaError(err) || isPermanentError(err),
       });
       status.existingIds.delete(item.videoId);
       status.playlistItems.delete(item.videoId);
@@ -954,7 +970,9 @@ export async function applyRemovals(youtube, status, opts = {}) {
       // cosmetic — the ledger is what remembers — and it costs another 50 units.
       if (unlike && item.liked) {
         try {
-          await withRetry(() => clearRating(youtube, item.videoId), { isFatal: isQuotaError });
+          await withRetry(() => clearRating(youtube, item.videoId), {
+            isFatal: (err) => isQuotaError(err) || isPermanentError(err),
+          });
           status.unliked++;
         } catch (err) {
           if (isQuotaError(err)) {
@@ -1041,13 +1059,13 @@ export async function applyInserts(youtube, status, opts = {}) {
   // changed by hand costs one rejected call, not one per video.
   let usePosition = true;
   /**
-   * Errors that end the retry loop at once: quota, and a manual-sort refusal (handled
-   * below by switching to appends).
+   * Errors that end the retry loop at once: quota, a manual-sort refusal (handled
+   * below by switching to appends), and any other permanent 400/404.
    *
    * @param {*} err - Error from an insert.
    * @returns {boolean} True when retrying cannot help.
    */
-  const insertFatal = (err) => isQuotaError(err) || isManualSortError(err);
+  const insertFatal = (err) => isQuotaError(err) || isManualSortError(err) || isPermanentError(err);
 
   // Videos below the channel's `after=` cutoff that are still in the playlist — a
   // `keep` channel, or a `remove` channel whose deletions have not all landed yet —

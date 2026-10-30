@@ -13,11 +13,9 @@
  * so the printed menu cannot drift from what actually runs, and neither shim needs
  * touching.
  *
- * This file is tooling and imports nothing from src/ at load time - see targets() for
- * why the two places that need src/ import it lazily.
- *
- * (That pointer predates the current layout: the lazy imports are channelParser(),
- * verifyGoogleCredentials(), heartbeatLine() and the list-channels target.)
+ * This file is tooling and imports nothing from src/ at load time - see channelParser()
+ * for why the places that need src/ (it, verifyGoogleCredentials(), heartbeatLine() and
+ * the list-channels target) import it lazily.
  *
  * @module make
  */
@@ -443,7 +441,9 @@ export function removeChannel(content, handle) {
 export function setEnvValue(content, key, value) {
   const eol = eolOf(content);
   const re = new RegExp(`^(\\s*${key}\\s*=).*$`, 'm');
-  if (re.test(content)) return content.replace(re, `${key}=${value}`);
+  // A replacer function, not a string: in a replacement string `$&`, `$1` and `$'` are
+  // patterns, so a value containing one would be rewritten on its way into .env.
+  if (re.test(content)) return content.replace(re, () => `${key}=${value}`);
   const body = content && !content.endsWith(eol) ? content + eol : content;
   return `${body}${key}=${value}${eol}`;
 }
@@ -1542,7 +1542,7 @@ export function targetGroups() {
            */
           async run() {
             const { runAllChecks } = await loadChecks();
-    const findings = await runAllChecks({
+            const findings = await runAllChecks({
               targetNames: allTargetNames(),
               targets: targetGroups().flatMap((g) => g.items),
               shims: shimState(),
@@ -1573,7 +1573,7 @@ export function targetGroups() {
               }
             }
             const { runAllChecks } = await loadChecks();
-    const findings = await runAllChecks({
+            const findings = await runAllChecks({
               targetNames: allTargetNames(),
               targets: targetGroups().flatMap((g) => g.items),
               shims: shimState(),
