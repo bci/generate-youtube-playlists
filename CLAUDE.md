@@ -341,6 +341,28 @@ artifact:
 A build tool's minified output is acceptable only where the readable source sits beside
 it in the repo and is what gets edited. Say so when that happens.
 
+## Two Claude Sessions: the CLI Writes, the App Researches
+
+Kent often has two Claude sessions on one repo: Claude Code in a terminal or VS Code (`cli`)
+and the Claude desktop or Cowork app (`app`). They cannot message each other. Two sessions
+editing one working tree also lose work silently: one writes back its stale copy over the
+other's change, with no error and nothing in the diff to notice.
+
+- **The CLI session owns the repo.** It alone edits files, runs the repo's checks, commits
+  and pushes.
+- **The app researches, and does what the CLI asks.** It hands back findings and proposed
+  text through the agent-pipe mailbox (the `agent-pipe` skill), and the CLI applies them.
+- **The app's only writes are to the mailbox:** new messages in `<pipe>/to-cli/`, and its own
+  inbox messages moved to `<pipe>/archive/`. The folder Kent grants the app must allow
+  writing for that to work, and that permission covers nothing else in the tree.
+- **App-only repos.** Some repos, usually ones with no code, are worked only from the app.
+  There the app may edit files once it has checked that no CLI session is working on the repo
+  and Kent has said yes. Signs of a CLI session: a pipe (`.agent-pipe/` or
+  `.claude/agent-pipe/`) with recent messages from `cli`, or uncommitted changes the app did
+  not make. If either is there, or the app cannot tell, it stays a researcher and asks Kent.
+- **Changes you did not make** (in `git status`, or a file that changed since you read it):
+  stop and ask Kent. Do not build on them or revert them.
+
 <!-- CLAUDE-CORE:END v1 -->
 
 ## 11. This Tool Spends Quota and Edits a Real Account
