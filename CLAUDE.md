@@ -341,6 +341,13 @@ artifact:
 A build tool's minified output is acceptable only where the readable source sits beside
 it in the repo and is what gets edited. Say so when that happens.
 
+**Lint warnings are fixed, never ignored**, markdownlint included (Kent, 2026-11-02 and
+2026-11-16). A warning in a file you touch is fixed in the same change, or named and asked
+about. It is never dismissed as pre-existing, and never silenced with a blanket disable. A rule
+a repo turns off says why in its config; claude-config's `templates/.markdownlint.jsonc` is
+the model. Read an auto-fixer's diff before keeping it: `markdownlint-cli2 --fix` renumbers
+list numbers that other text cites, and flattens nested lists.
+
 ## Two Claude Sessions: the CLI Writes, the App Researches
 
 Kent often has two Claude sessions on one repo: Claude Code in a terminal or VS Code (`cli`)
@@ -366,6 +373,37 @@ other's change, with no error and nothing in the diff to notice.
   not make. If either is there, or the app cannot tell, it stays a researcher and asks Kent.
 - **Changes you did not make** (in `git status`, or a file that changed since you read it):
   stop and ask Kent. Do not build on them or revert them.
+
+## The Claude Account a Repo Is Worked In
+
+Work done under the wrong Claude account is billed to and recorded against the wrong
+client's organisation, and it cannot be moved afterwards. **The account this repo expects
+is named in its `claude-*` profile block.** A repo with no such block has no expectation,
+and nothing in this section applies to it.
+
+**Where the account comes from, in this order:**
+
+1. **`CLAUDE_CODE_USER_EMAIL`** in the session's environment: the session's own account,
+   beside `CLAUDE_CODE_ACCOUNT_UUID` and `CLAUDE_CODE_ORGANIZATION_UUID`. The desktop app
+   sets it. A VS Code session did not (2026-11-24), so it cannot be the only source.
+2. **`claude auth status --json`**: the stored CLI login. One login serves every terminal
+   and VS Code session on the Mac, and says nothing about the desktop app, which signs in
+   separately.
+3. **Never `~/.claude.json`.** It holds whichever account last signed in or refreshed, from
+   any session in any folder. On 2026-11-24 it named one account and organisation while the
+   session itself was in another, and a check built on it sent Kent toward logging out of a
+   session that was correctly signed in.
+
+On Kent's Macs a hook (`~/.claude/hooks/account-check.sh`) runs this check at session start,
+on every prompt, and before a `git commit` or `git push`. **When it warns, raise it before
+doing work that bills.**
+
+**Switching account is per client.** `/logout` in one terminal or VS Code session moves all
+of them, mid-session. The desktop app and claude.ai sign in separately: fix a mismatch there
+in that client's own account menu, and never answer it with `/logout`.
+
+**Say which source you read, and claim nothing more.** "The CLI login is X" and "this
+session is X" are different statements; only the first two sources above support either.
 
 ## Safety: Secrets, Deletions and Outside Content
 
@@ -645,3 +683,15 @@ and the right one depends on the client folder the repo sits in, so never assume
   bci)" git push`.
 
 <!-- CLAUDE-PROFILE:github-bci:END v1 -->
+
+<!-- CLAUDE-PROFILE:claude-bci:BEGIN v1 -->
+<!-- Managed by bci/claude-config (profiles/claude-bci.md). Edit there, not here. -->
+
+## Claude Account: `kent@bci.com`
+
+This repo is worked in the **`kent@bci.com`** Claude account, Kent's own Pro account. Work done
+under any other account is billed to and recorded against the wrong organisation. How to check
+which account a session is in, and what to do when it is the wrong one: core, "The Claude
+Account a Repo Is Worked In".
+
+<!-- CLAUDE-PROFILE:claude-bci:END v1 -->
